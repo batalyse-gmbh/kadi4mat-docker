@@ -106,9 +106,9 @@ attaches `kadi`, `celery` and `celerybeat` to that network (the `kadi4mat-kadi` 
 (`compose.proxy-network.yml` and `PROXY_NETWORK` from earlier versions are replaced by this.)
 
 Attach external networks only through these override files. Adding one to the `x-kadi`
-anchor in `docker-compose.yml` as well declares it twice per container. Depending on the
-Compose version, that silently drops one entry (including the `kadi4mat-kadi` alias) or
-fails when containers are recreated.
+anchor in `docker-compose.yml` as well declares it twice per container. Compose 5.5
+collapses that into one attachment, but the outcome is version dependent (this is what the
+original deployment ran into), so `scripts/check-compose.sh` treats it as an error.
 
 **No proxy on the host**: add `caddy` to `COMPOSE_PROFILES`. It uses ports 80/443 and gets a
 Let's Encrypt certificate for `KADI_SERVER_NAME` automatically.

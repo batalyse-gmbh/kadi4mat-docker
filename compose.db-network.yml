@@ -6,8 +6,7 @@
 #   DB_NETWORK=<network name>
 #
 # DB_NETWORK must not equal EXTERNAL_NETWORK. The network would be declared twice per
-# container, which Compose silently collapses (possibly dropping the kadi4mat-kadi alias) or
-# fails on when recreating containers, depending on the version.
+# container, and how Compose resolves that depends on its version.
 services:
   kadi:
     networks:

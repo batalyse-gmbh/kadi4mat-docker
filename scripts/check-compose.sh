@@ -2,8 +2,8 @@
 # Validates docker-compose.yml together with every supported profile/override combination:
 #   1. "docker compose config -q" must succeed.
 #   2. No service may reference the same Docker network twice (e.g. once through the x-kadi
-#      anchor and once through an override). "config" accepts that, but Compose then drops
-#      one entry's settings or fails when recreating containers.
+#      anchor and once through an override). "config" accepts that, and how Compose then
+#      resolves it depends on its version.
 #   3. kadi, celery and celerybeat mount their data directories (a service-level list
 #      replaces, rather than extends, the one from the x-kadi anchor).
 #   4. With compose.bind-mounts.yml, no service may still use a named volume.

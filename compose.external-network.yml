@@ -9,9 +9,8 @@
 #
 # If the database is on a different network than the proxy, also add
 # compose.db-network.yml. Never point both overrides (or the x-kadi anchor in
-# docker-compose.yml) at the same network. The network would be declared twice per
-# container, which Compose silently collapses (possibly dropping the alias) or fails on when
-# recreating containers, depending on the version. scripts/check-compose.sh detects this.
+# docker-compose.yml) at the same network. It would be declared twice per container; how
+# Compose resolves that depends on its version. scripts/check-compose.sh detects this.
 services:
   kadi:
     networks:

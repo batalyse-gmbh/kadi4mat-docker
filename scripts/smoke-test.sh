@@ -65,7 +65,8 @@ esac
 
 echo "--- placeholder configuration must be rejected"
 image="kadi4mat:$(sed -n 's/^KADI_VERSION=//p' .env)"
-compose build kadi >/dev/null
+# CI loads a cached image beforehand; only build when it is missing.
+docker image inspect "$image" >/dev/null 2>&1 || compose build kadi >/dev/null
 if output=$(docker run --rm --entrypoint python \
   -e KADI_SERVER_NAME=kadi4mat.example.edu -e KADI_SECRET_KEY=change-me \
   -e POSTGRES_PASSWORD=change-me "$image" /opt/kadi/config/kadi.py 2>&1); then

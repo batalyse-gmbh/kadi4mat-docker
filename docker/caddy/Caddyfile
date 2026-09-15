@@ -1,0 +1,6 @@
+# Bundled reverse proxy (COMPOSE_PROFILES=caddy). Obtains a Let's Encrypt certificate for
+# KADI_SERVER_NAME automatically; "localhost" gets a locally trusted internal certificate.
+{$KADI_SERVER_NAME} {
+	encode zstd gzip
+	reverse_proxy kadi:8000
+}

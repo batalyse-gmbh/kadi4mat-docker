@@ -1,0 +1,139 @@
+name: kadi4mat
+
+x-kadi: &kadi
+  image: kadi4mat:${KADI_VERSION:-1.12.0}
+  restart: unless-stopped
+  init: true
+  env_file: .env
+  extra_hosts:
+    # Lets POSTGRES_HOST=host.docker.internal reach a database running on the Docker host.
+    - "host.docker.internal:host-gateway"
+  volumes:
+    - storage:/opt/kadi/storage
+    - uploads:/opt/kadi/uploads
+  networks: [backend]
+
+services:
+  # Bundled database, enabled with COMPOSE_PROFILES=postgres. Leave the profile out to use
+  # an existing server via POSTGRES_HOST/POSTGRES_PORT instead.
+  postgres:
+    profiles: [postgres]
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kadi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-kadi}
+      POSTGRES_INITDB_ARGS: --encoding=UTF8
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis:/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTICSEARCH_VERSION:-8.17.0}
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      xpack.security.http.ssl.enabled: "false"
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms1g -Xmx1g}
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    volumes:
+      - elasticsearch:/usr/share/elasticsearch/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  # uWSGI application server. Runs "kadi db init" and "kadi search init" on start.
+  kadi:
+    <<: *kadi
+    build:
+      context: .
+      args:
+        KADI_VERSION: ${KADI_VERSION:-1.12.0}
+    command: ["web"]
+    environment:
+      UWSGI_PROCESSES: ${UWSGI_PROCESSES:-4}
+      UWSGI_OFFLOAD_THREADS: ${UWSGI_OFFLOAD_THREADS:-2}
+    ports:
+      # Plain HTTP for a reverse proxy running directly on the host. Never bind this
+      # publicly: Kadi trusts X-Forwarded-For, so direct clients could spoof their IP.
+      - "${KADI_HTTP_BIND:-127.0.0.1:8000}:8000"
+    depends_on:
+      postgres: { condition: service_healthy, required: false }
+      redis: { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8000), 2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  celery:
+    <<: *kadi
+    command: ["worker"]
+    depends_on:
+      kadi: { condition: service_healthy }
+
+  celerybeat:
+    <<: *kadi
+    command: ["beat"]
+    depends_on:
+      kadi: { condition: service_healthy }
+
+  # Bundled reverse proxy, only for hosts without one: enable with COMPOSE_PROFILES=caddy.
+  # Needs ports 80 and 443 and a KADI_SERVER_NAME without a port.
+  caddy:
+    profiles: [caddy]
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      KADI_SERVER_NAME: ${KADI_SERVER_NAME:?set KADI_SERVER_NAME in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [backend]
+    depends_on:
+      kadi: { condition: service_healthy }
+
+networks:
+  backend:
+
+volumes:
+  postgres:
+  redis:
+  elasticsearch:
+  storage:
+  uploads:
+  caddy_data:
+  caddy_config:

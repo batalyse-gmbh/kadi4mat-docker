@@ -1,0 +1,16 @@
+# Optional override for a reverse proxy that runs as a container on this host: attaches
+# the kadi service to the proxy's existing Docker network, so the proxy can reach it as
+# "kadi4mat-kadi:8000". Enable it in .env with
+#   COMPOSE_FILE=docker-compose.yml:compose.proxy-network.yml
+#   PROXY_NETWORK=<name of your proxy's network>
+services:
+  kadi:
+    networks:
+      backend:
+      proxy:
+        aliases: [kadi4mat-kadi]
+
+networks:
+  proxy:
+    name: ${PROXY_NETWORK:?set PROXY_NETWORK in .env}
+    external: true

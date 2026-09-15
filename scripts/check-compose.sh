@@ -94,6 +94,8 @@ check "caddy" ok "COMPOSE_PROFILES=caddy"
 check "postgres+caddy" ok "COMPOSE_PROFILES=postgres,caddy"
 check "bind-mounts" ok "COMPOSE_PROFILES=postgres,caddy" \
   "COMPOSE_FILE=docker-compose.yml:compose.bind-mounts.yml" "KADI_DATA_DIR=/data/kadi"
+check "bind-mounts with external database" ok "COMPOSE_PROFILES=" \
+  "COMPOSE_FILE=docker-compose.yml:compose.bind-mounts.yml" "KADI_DATA_DIR=/data/kadi"
 check "bind-mounts without KADI_DATA_DIR" fail "COMPOSE_PROFILES=postgres" \
   "COMPOSE_FILE=docker-compose.yml:compose.bind-mounts.yml"
 check "external-network" ok "COMPOSE_PROFILES=" \

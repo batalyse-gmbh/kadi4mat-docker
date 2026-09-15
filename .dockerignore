@@ -1,4 +1,8 @@
 .env
 .git
+.github
+.hadolint.yaml
 README.md
 docker-compose.yml
+compose.*.yml
+scripts

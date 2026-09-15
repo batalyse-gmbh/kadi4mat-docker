@@ -5,11 +5,17 @@ import os
 from urllib.parse import quote_plus
 
 
+# Placeholders from .env.example that must never reach a running instance.
+_PLACEHOLDER = "change-me"
+_EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net", "example.edu", "example")
+_errors = []
+
+
 def _env(name, default=None, required=False):
     value = os.environ.get(name, default)
 
     if required and not value:
-        raise RuntimeError(f"Environment variable '{name}' must be set.")
+        _errors.append(f"{name} must be set.")
 
     return value
 
@@ -28,12 +34,28 @@ AUTH_PROVIDERS = [
     }
 ]
 
-SERVER_NAME = _env("KADI_SERVER_NAME", required=True)
-SECRET_KEY = _env("KADI_SECRET_KEY", required=True)
+SERVER_NAME = _env("KADI_SERVER_NAME", required=True) or ""
+SECRET_KEY = _env("KADI_SECRET_KEY", required=True) or ""
+
+_host = SERVER_NAME.rsplit(":", 1)[0].lower().rstrip(".")
+if any(_host == domain or _host.endswith(f".{domain}") for domain in _EXAMPLE_DOMAINS):
+    _errors.append(
+        f"KADI_SERVER_NAME is the placeholder domain '{SERVER_NAME}'. Set it to the"
+        " public hostname of this instance."
+    )
+
+if SECRET_KEY == _PLACEHOLDER or (SECRET_KEY and len(SECRET_KEY) < 32):
+    _errors.append(
+        "KADI_SECRET_KEY must be a random value of at least 32 characters. Generate one"
+        ' with: python3 -c "import secrets; print(secrets.token_hex(32))"'
+    )
+
+if os.environ.get("POSTGRES_PASSWORD") == _PLACEHOLDER:
+    _errors.append("POSTGRES_PASSWORD is still the placeholder 'change-me'.")
 
 SQLALCHEMY_DATABASE_URI = "postgresql://{user}:{password}@{host}:{port}/{db}?sslmode={sslmode}".format(
     user=quote_plus(_env("POSTGRES_USER", "kadi")),
-    password=quote_plus(_env("POSTGRES_PASSWORD", required=True)),
+    password=quote_plus(_env("POSTGRES_PASSWORD", required=True) or ""),
     host=_env("POSTGRES_HOST", "postgres"),
     port=_env("POSTGRES_PORT", "5432"),
     db=_env("POSTGRES_DB", "kadi"),
@@ -63,3 +85,11 @@ SMTP_USERNAME = _env("KADI_SMTP_USERNAME", "")
 SMTP_PASSWORD = _env("KADI_SMTP_PASSWORD", "")
 SMTP_USE_TLS = _env_bool("KADI_SMTP_USE_TLS", True)
 MAIL_NO_REPLY = _env("KADI_MAIL_NO_REPLY", f"no-reply@{SERVER_NAME}")
+
+if _errors:
+    # SystemExit instead of an exception: every process loading this file (uWSGI, Celery,
+    # CLI) stops with just this message instead of a traceback.
+    raise SystemExit(
+        "Invalid Kadi configuration (check .env):\n"
+        + "\n".join(f"  - {error}" for error in _errors)
+    )

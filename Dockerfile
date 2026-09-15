@@ -56,7 +56,7 @@ ENV PATH="/opt/kadi/venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1
 
 WORKDIR /opt/kadi
-USER kadi
+USER 10001:10001
 EXPOSE 8000
 
 ENTRYPOINT ["kadi-entrypoint"]

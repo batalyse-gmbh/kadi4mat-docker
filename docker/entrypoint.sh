@@ -3,6 +3,15 @@ set -e
 
 case "$1" in
   web)
+    # Fail fast with a readable message on missing or placeholder settings, instead of a
+    # traceback inside the database retry loop below.
+    python "${KADI_CONFIG_FILE}"
+
+    if [ "${KADI_SMTP_HOST:-localhost}" = "localhost" ]; then
+      echo "WARNING: KADI_SMTP_HOST is 'localhost', which is this container. Emails" \
+        "(password resets, notifications) will not be delivered." >&2
+    fi
+
     # Both commands are idempotent: they apply pending migrations / create missing
     # indices, so running them on every start also handles upgrades. The retries cover an
     # external database that is not reachable yet (the bundled one has a healthcheck).
@@ -26,6 +35,8 @@ case "$1" in
     ;;
   beat)
     # Schedule state is disposable; an empty pidfile avoids stale-pid failures on restart.
+    # Removing the schedule on start also backs the healthcheck in docker-compose.yml.
+    rm -f /tmp/celerybeat-schedule*
     exec kadi celery beat --loglevel=INFO --pidfile= -s /tmp/celerybeat-schedule
     ;;
   *)

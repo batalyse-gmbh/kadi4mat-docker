@@ -1,0 +1,25 @@
+# Optional override: attach kadi, celery and celerybeat to the existing Docker network of
+# an external PostgreSQL container (POSTGRES_HOST=<its container name>). Only needed when
+# that network differs from EXTERNAL_NETWORK; if the proxy and the database share one
+# network, use compose.external-network.yml alone. Enable it in .env with
+#   COMPOSE_FILE=docker-compose.yml:compose.db-network.yml
+#   DB_NETWORK=<network name>
+#
+# DB_NETWORK must not equal EXTERNAL_NETWORK. The network would be declared twice per
+# container, which Compose silently collapses (possibly dropping the kadi4mat-kadi alias) or
+# fails on when recreating containers, depending on the version.
+services:
+  kadi:
+    networks:
+      database: {}
+  celery:
+    networks:
+      database: {}
+  celerybeat:
+    networks:
+      database: {}
+
+networks:
+  database:
+    name: ${DB_NETWORK:?set DB_NETWORK in .env}
+    external: true

@@ -11,6 +11,11 @@ x-kadi: &kadi
   volumes:
     - storage:/opt/kadi/storage
     - uploads:/opt/kadi/uploads
+  # Only the internal network belongs here. Attach external networks through
+  # compose.external-network.yml / compose.db-network.yml instead: listing the same network
+  # in this anchor and in an override declares it twice for the same container. Compose
+  # then silently keeps only one entry (possibly dropping the kadi4mat-kadi alias) or fails
+  # when recreating containers, depending on the version.
   networks: [backend]
 
 services:
@@ -48,10 +53,12 @@ services:
       retries: 20
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTICSEARCH_VERSION:-8.17.0}
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTICSEARCH_VERSION:-8.19.21}
     restart: unless-stopped
     environment:
       discovery.type: single-node
+      # Keeps the heap out of swap; requires the memlock ulimit below.
+      bootstrap.memory_lock: "true"
       xpack.security.enabled: "false"
       xpack.security.transport.ssl.enabled: "false"
       xpack.security.http.ssl.enabled: "false"
@@ -99,12 +106,30 @@ services:
     command: ["worker"]
     depends_on:
       kadi: { condition: service_healthy }
+    healthcheck:
+      # Plain celery with only the broker URL answers in about a second; "kadi celery ..."
+      # would load the whole Flask app and check the database on every probe.
+      test: ["CMD-SHELL", "celery --broker \"$${KADI_REDIS_URL:-redis://redis:6379/0}\" inspect ping --destination \"celery@$${HOSTNAME}\" --timeout 10 >/dev/null"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 60s
 
   celerybeat:
     <<: *kadi
     command: ["beat"]
     depends_on:
       kadi: { condition: service_healthy }
+    healthcheck:
+      # The entrypoint deletes the schedule file on start, so its presence means this run
+      # got past app initialization and set up the scheduler. The file's mtime is no
+      # liveness signal: Kadi's only periodic task runs hourly. A crashed beat process
+      # stops the container, which resets the health status.
+      test: ["CMD", "test", "-f", "/tmp/celerybeat-schedule"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   # Bundled reverse proxy, only for hosts without one: enable with COMPOSE_PROFILES=caddy.
   # Needs ports 80 and 443 and a KADI_SERVER_NAME without a port.

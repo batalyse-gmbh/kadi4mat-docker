@@ -1,0 +1,88 @@
+# Optional override: keep all persistent data in host directories under KADI_DATA_DIR
+# instead of named Docker volumes. Enable it in .env with
+#   COMPOSE_FILE=docker-compose.yml:compose.bind-mounts.yml
+#   KADI_DATA_DIR=/data/kadi
+#
+# Docker creates missing bind-mount sources as root:root 755, which the non-root services
+# cannot write to. The one-shot init-permissions service therefore creates the directories
+# and fixes their ownership before anything else starts. It changes ownership recursively,
+# but only if some file inside has the wrong owner, so restored backups get fixed as well.
+#
+# Owners, as used by the pinned images:
+#   postgres/       999:999    (postgres:17)
+#   redis/          999:999    (redis:7)
+#   elasticsearch/  1000:0     (elasticsearch 8.x)
+#   storage/        10001:10001 (kadi)
+#   uploads/        10001:10001 (kadi)
+#   caddy/          0:0        (caddy:2 runs as root)
+#
+# Named volumes that already hold data are not migrated automatically, see README.md.
+
+x-wait-for-permissions: &wait-for-permissions
+  init-permissions: { condition: service_completed_successfully }
+
+services:
+  init-permissions:
+    image: alpine:3.24
+    user: "0:0"
+    restart: "no"
+    network_mode: none
+    volumes:
+      - ${KADI_DATA_DIR:?set KADI_DATA_DIR in .env}:/data
+    command:
+      - sh
+      - -euc
+      - |
+        fix() {
+          dir="/data/$$1" owner="$$2" mode="$$3"
+          mkdir -p "$$dir"
+          if [ -n "$$(find "$$dir" ! -user "$${owner%:*}" -print -quit)" ] ||
+             [ -n "$$(find "$$dir" ! -group "$${owner#*:}" -print -quit)" ]; then
+            echo "chown -R $$owner $$dir"
+            chown -R "$$owner" "$$dir"
+          fi
+          chmod "$$mode" "$$dir"
+        }
+        fix postgres 999:999 700
+        fix redis 999:999 750
+        fix elasticsearch 1000:0 750
+        fix storage 10001:10001 750
+        fix uploads 10001:10001 750
+        fix caddy/data 0:0 700
+        fix caddy/config 0:0 700
+        echo "Permissions under KADI_DATA_DIR are set."
+
+  postgres:
+    volumes:
+      - ${KADI_DATA_DIR}/postgres:/var/lib/postgresql/data
+    depends_on: *wait-for-permissions
+
+  redis:
+    volumes:
+      - ${KADI_DATA_DIR}/redis:/data
+    depends_on: *wait-for-permissions
+
+  elasticsearch:
+    volumes:
+      - ${KADI_DATA_DIR}/elasticsearch:/usr/share/elasticsearch/data
+    depends_on: *wait-for-permissions
+
+  kadi:
+    volumes: &kadi-data
+      - ${KADI_DATA_DIR}/storage:/opt/kadi/storage
+      - ${KADI_DATA_DIR}/uploads:/opt/kadi/uploads
+    depends_on: *wait-for-permissions
+
+  celery:
+    volumes: *kadi-data
+    depends_on: *wait-for-permissions
+
+  celerybeat:
+    volumes: *kadi-data
+    depends_on: *wait-for-permissions
+
+  caddy:
+    volumes:
+      - ${KADI_DATA_DIR}/caddy/data:/data
+      - ${KADI_DATA_DIR}/caddy/config:/config
+    depends_on: *wait-for-permissions

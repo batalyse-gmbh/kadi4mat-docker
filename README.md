@@ -221,7 +221,8 @@ your clients cache the JWKS. Never overwrite a key file in place.
   so set `KADI_SMTP_*` to a real mail server, or password resets and notifications are lost.
 - Elasticsearch needs `vm.max_map_count >= 262144` on the Docker host. Its heap is locked
   in memory (`bootstrap.memory_lock`); if the host does not allow that (e.g. rootless
-  Docker), Elasticsearch logs a warning and runs unlocked. `ELASTICSEARCH_VERSION` selects
+  Docker), Elasticsearch should log a warning and run unlocked, since a single-node setup
+  does not enforce bootstrap checks (not tested). `ELASTICSEARCH_VERSION` selects
   the image tag; stay on 8.x, Kadi 1.12 does not support Elasticsearch 9.
 - Other [configuration options](https://kadi.readthedocs.io/en/stable/installation/configuration.html)
   go into `config/kadi.py`, then run `docker compose up -d --build`.

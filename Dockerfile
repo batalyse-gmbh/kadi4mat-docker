@@ -39,15 +39,17 @@ RUN groupadd --system --gid 10001 kadi \
 COPY --from=builder /opt/kadi/venv /opt/kadi/venv
 COPY config/ /opt/kadi/config/
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/kadi-entrypoint
+COPY --chmod=755 docker/oidc-keys.py /usr/local/bin/kadi-oidc-keys
 
 # Pre-create the data directories so fresh named volumes inherit this ownership, and
 # expose the package's static files under a stable path for uwsgi.ini.
 RUN chown -R root:kadi /opt/kadi/config \
     && chmod 750 /opt/kadi/config \
     && chmod 640 /opt/kadi/config/* \
-    && mkdir -p /opt/kadi/storage /opt/kadi/uploads \
-    && chown -R kadi:kadi /opt/kadi/storage /opt/kadi/uploads \
+    && mkdir -p /opt/kadi/storage /opt/kadi/uploads /opt/kadi/oidc \
+    && chown -R kadi:kadi /opt/kadi/storage /opt/kadi/uploads /opt/kadi/oidc \
     && chmod 750 /opt/kadi/storage /opt/kadi/uploads \
+    && chmod 700 /opt/kadi/oidc \
     && ln -s "$(/opt/kadi/venv/bin/python -c 'import kadi, os; print(os.path.join(os.path.dirname(kadi.__file__), "static"))')" /opt/kadi/static
 
 ENV PATH="/opt/kadi/venv/bin:${PATH}" \

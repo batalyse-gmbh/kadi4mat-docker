@@ -12,6 +12,8 @@ case "$1" in
         "(password resets, notifications) will not be delivered." >&2
     fi
 
+    kadi-oidc-keys ensure
+
     # Both commands are idempotent: they apply pending migrations / create missing
     # indices, so running them on every start also handles upgrades. The retries cover an
     # external database that is not reachable yet (the bundled one has a healthcheck).

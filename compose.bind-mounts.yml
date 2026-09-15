@@ -14,6 +14,7 @@
 #   elasticsearch/  1000:0     (elasticsearch 8.x)
 #   storage/        10001:10001 (kadi)
 #   uploads/        10001:10001 (kadi)
+#   oidc/           10001:10001 (kadi, OIDC signing keys, mode 700)
 #   caddy/          0:0        (caddy:2 runs as root)
 #
 # Named volumes that already hold data are not migrated automatically, see README.md.
@@ -48,6 +49,7 @@ services:
         fix elasticsearch 1000:0 750
         fix storage 10001:10001 750
         fix uploads 10001:10001 750
+        fix oidc 10001:10001 700
         fix caddy/data 0:0 700
         fix caddy/config 0:0 700
         echo "Permissions under KADI_DATA_DIR are set."
@@ -68,13 +70,16 @@ services:
     depends_on: *wait-for-permissions
 
   kadi:
-    volumes: &kadi-data
+    volumes:
       - ${KADI_DATA_DIR}/storage:/opt/kadi/storage
       - ${KADI_DATA_DIR}/uploads:/opt/kadi/uploads
+      - ${KADI_DATA_DIR}/oidc:/opt/kadi/oidc
     depends_on: *wait-for-permissions
 
   celery:
-    volumes: *kadi-data
+    volumes: &kadi-data
+      - ${KADI_DATA_DIR}/storage:/opt/kadi/storage
+      - ${KADI_DATA_DIR}/uploads:/opt/kadi/uploads
     depends_on: *wait-for-permissions
 
   celerybeat:

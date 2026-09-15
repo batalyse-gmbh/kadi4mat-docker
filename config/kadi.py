@@ -72,6 +72,19 @@ PROXY_FIX_HEADERS = {"x_for": 1, "x_proto": 1}
 # headers (Content-Disposition, Content-Type, CSP, nosniff) intact.
 USE_X_SENDFILE = False
 
+# OIDC provider (opt-in): Kadi signs ID tokens with the first key and publishes all of them
+# in /oauth/jwks.json, so older keys can stay listed during a rotation. Keys are RSA PEM
+# files; the entrypoint generates the default one on first start and checks all of them.
+if _env_bool("KADI_OIDC_PROVIDER", False):
+    OIDC_SIGNING_KEYS = [
+        path.strip()
+        for path in _env("KADI_OIDC_SIGNING_KEYS", "").split(",")
+        if path.strip()
+    ] or ["/opt/kadi/oidc/signing-key.pem"]
+
+    if any(not os.path.isabs(path) for path in OIDC_SIGNING_KEYS):
+        _errors.append("KADI_OIDC_SIGNING_KEYS must only contain absolute paths.")
+
 STORAGE_PATH = "/opt/kadi/storage"
 MISC_UPLOADS_PATH = "/opt/kadi/uploads"
 

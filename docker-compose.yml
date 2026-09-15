@@ -83,6 +83,12 @@ services:
       args:
         KADI_VERSION: ${KADI_VERSION:-1.12.0}
     command: ["web"]
+    # Replaces (does not extend) the anchor's list, so storage and uploads are repeated.
+    volumes:
+      - storage:/opt/kadi/storage
+      - uploads:/opt/kadi/uploads
+      # OIDC signing keys. Only the web app signs tokens, so celery does not mount them.
+      - oidc:/opt/kadi/oidc
     environment:
       UWSGI_PROCESSES: ${UWSGI_PROCESSES:-4}
       UWSGI_OFFLOAD_THREADS: ${UWSGI_OFFLOAD_THREADS:-2}
@@ -160,5 +166,6 @@ volumes:
   elasticsearch:
   storage:
   uploads:
+  oidc:
   caddy_data:
   caddy_config:

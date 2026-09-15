@@ -25,6 +25,7 @@ Optional features are switched on in `.env` only; `docker-compose.yml` never nee
 | `COMPOSE_FILE=...:compose.bind-mounts.yml`          | Data in host directories under `KADI_DATA_DIR`    |
 | `COMPOSE_FILE=...:compose.external-network.yml`     | Join an existing network (`EXTERNAL_NETWORK`)     |
 | `COMPOSE_FILE=...:compose.db-network.yml`           | Also join the database's network (`DB_NETWORK`)   |
+| `KADI_OIDC_PROVIDER=true`                           | Kadi acts as an OpenID Connect provider           |
 
 `COMPOSE_FILE` is colon separated and must start with `docker-compose.yml`, e.g.
 `COMPOSE_FILE=docker-compose.yml:compose.bind-mounts.yml:compose.external-network.yml`.
@@ -75,6 +76,7 @@ recursively when a file has the wrong owner, so data restored as root is fixed t
 | `redis/`                        | `999:999`       | `redis` in `redis:7`           |
 | `elasticsearch/`                | `1000:0`        | `elasticsearch` in the ES 8.x image |
 | `storage/`, `uploads/`          | `10001:10001`   | `kadi` in this image           |
+| `oidc/` (mode 700)              | `10001:10001`   | `kadi` in this image           |
 | `caddy/data/`, `caddy/config/`  | `0:0`           | `caddy:2` runs as root         |
 
 Directories for disabled services (e.g. `postgres/` with an external database) are created
@@ -142,6 +144,68 @@ CREATE DATABASE kadi OWNER kadi ENCODING 'UTF8' TEMPLATE template0;
 
 If the server is unreachable, `kadi` retries for about 2.5 minutes before exiting.
 
+## OIDC provider
+
+Since version 1.8, Kadi can act as an OpenID Connect provider, so other applications can
+log users in with their Kadi account. Enable it with `KADI_OIDC_PROVIDER=true`.
+
+On startup, `kadi` generates a 3072 bit RSA signing key at `/opt/kadi/oidc/signing-key.pem`
+if it is missing (`oidc` volume, or `KADI_DATA_DIR/oidc/` with bind mounts, readable only
+by uid 10001). It then checks every configured key and refuses to start if one is missing,
+unreadable or not RSA. Kadi itself would only fail while issuing a token, with an HTTP 500
+after the authorization code was already used. Include the key in backups.
+
+Endpoints, with the issuer `https://<KADI_SERVER_NAME>`:
+
+| Purpose        | URL                                   |
+| -------------- | ------------------------------------- |
+| Discovery      | `/.well-known/openid-configuration`   |
+| Authorization  | `/oauth/authorize`                    |
+| Token          | `/oauth/token`                        |
+| JWKS           | `/oauth/jwks.json`                    |
+| User info      | `/api/oauth/userinfo`                 |
+| Revocation     | `/oauth/revoke`                       |
+
+Kadi serves these even while the provider is disabled, but without keys the JWKS is empty
+and ID tokens cannot be signed. All URLs must come out as `https://` on your public
+hostname: that requires `KADI_SERVER_NAME` to be exact and the proxy to send
+`X-Forwarded-Proto` (Caddy does by default).
+
+**Registering a client application** works only in the web UI: log in as the user who
+should own the client, open *Settings → Applications* (`/settings/applications`), enter
+the redirect URIs (exact match, one per line) and tick the *OpenID Connect* scopes
+(`openid`, `profile`, `email`; stored as `oidc.openid` etc.). They only appear while the
+provider is enabled. Kadi shows the client secret once, after registering.
+
+Things client developers need to know:
+
+- Only the authorization code flow is supported. The client must authenticate at the token
+  endpoint with `client_secret_post` (credentials in the form body); HTTP Basic is rejected.
+  PKCE (`S256`) and `nonce` are optional but honoured.
+- The granted scopes are always the ones registered for the client, whatever the request
+  asks for.
+- `sub` is Kadi's numeric user ID as a string. It is stable, unlike the email address, so
+  identify users by (issuer, `sub`).
+- Claims: `profile` gives `name` and `preferred_username`, `email` gives `email` and
+  `email_verified`. Careful: Kadi puts the **username** into `name` and the **display name**
+  into `preferred_username`, the reverse of the usual meaning.
+- ID tokens and access tokens are valid for one hour. Refresh tokens do not expire, are
+  rotated on every use, and a refresh returns no new ID token.
+- Each user holds one token per client: a new login (e.g. on a second device) revokes the
+  previous tokens of that user for that client.
+
+**Rotating the key**: generate a new one and list it first, keeping the old one for
+verification of tokens issued before the switch:
+
+```sh
+docker compose exec kadi kadi-oidc-keys generate /opt/kadi/oidc/signing-key-2.pem
+# .env: KADI_OIDC_SIGNING_KEYS=/opt/kadi/oidc/signing-key-2.pem,/opt/kadi/oidc/signing-key.pem
+docker compose up -d
+```
+
+Remove the old key from the list after the ID token lifetime (one hour) plus however long
+your clients cache the JWKS. Never overwrite a key file in place.
+
 ## Differences from the official Apache setup
 
 - **File downloads are streamed by uWSGI**, not handed to the web server via `X-Sendfile`
@@ -162,7 +226,8 @@ If the server is unreachable, `kadi` retries for about 2.5 minutes before exitin
 - Other [configuration options](https://kadi.readthedocs.io/en/stable/installation/configuration.html)
   go into `config/kadi.py`, then run `docker compose up -d --build`.
 - Upgrade: change `KADI_VERSION` in `.env`, then run `docker compose up -d --build`.
-- Backups: the database, plus the `storage` and `uploads` volumes. Search indices can be
+- Backups: the database, plus the `storage` and `uploads` volumes (and `oidc` with the OIDC
+  provider enabled). Search indices can be
   rebuilt with `kadi search reindex`.
 
 ## CI

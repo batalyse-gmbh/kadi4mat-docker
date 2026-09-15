@@ -45,6 +45,7 @@ sed -e "s|^KADI_SERVER_NAME=.*|KADI_SERVER_NAME=localhost|" \
   -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=smoke-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')|" \
   -e "s|^KADI_HTTP_BIND=.*|KADI_HTTP_BIND=127.0.0.1:$port|" \
   -e "s|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=postgres|" \
+  -e "s|^KADI_OIDC_PROVIDER=.*|KADI_OIDC_PROVIDER=true|" \
   .env.example > .env
 
 case "$mode" in
@@ -96,6 +97,17 @@ echo "elasticsearch memory lock: $locked"
 
 compose logs kadi | grep -q "WARNING: KADI_SMTP_HOST is 'localhost'"
 echo "SMTP warning logged"
+
+echo "--- OIDC provider"
+discovery=$(curl -fsS -H 'Host: localhost' -H 'X-Forwarded-Proto: https' \
+  "http://127.0.0.1:$port/.well-known/openid-configuration")
+echo "$discovery" | jq -e '.issuer == "https://localhost"
+  and .jwks_uri == "https://localhost/oauth/jwks.json"' >/dev/null
+jwks=$(curl -fsS -H 'Host: localhost' "http://127.0.0.1:$port/oauth/jwks.json")
+echo "$jwks" | jq -e '.keys | length == 1 and .[0].kty == "RSA" and .[0].alg == "RS256"' >/dev/null
+echo "issuer and JWKS ok: $(echo "$jwks" | jq -c '.keys[0] | {kid, kty, alg}')"
+compose exec -T kadi sh -c 'stat -c "%a %u" /opt/kadi/oidc/signing-key.pem' | grep -qx "600 10001"
+echo "signing key generated with mode 600"
 
 if [ "$mode" = bind ]; then
   echo "--- data directory ownership"

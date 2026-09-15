@@ -4,7 +4,9 @@
 #   2. No service may reference the same Docker network twice (e.g. once through the x-kadi
 #      anchor and once through an override). "config" accepts that, but Compose then drops
 #      one entry's settings or fails when recreating containers.
-#   3. With compose.bind-mounts.yml, no service may still use a named volume.
+#   3. kadi, celery and celerybeat mount their data directories (a service-level list
+#      replaces, rather than extends, the one from the x-kadi anchor).
+#   4. With compose.bind-mounts.yml, no service may still use a named volume.
 # Runs in a temporary copy of the repository, so an existing .env is never touched.
 set -eu
 
@@ -46,6 +48,19 @@ check() {
     if [ -n "$dupes" ]; then
       result=fail
       reason=$dupes
+    fi
+
+    missing=$(printf '%s' "$json" | jq -r '
+      {kadi: ["/opt/kadi/storage", "/opt/kadi/uploads", "/opt/kadi/oidc"],
+       celery: ["/opt/kadi/storage", "/opt/kadi/uploads"],
+       celerybeat: ["/opt/kadi/storage", "/opt/kadi/uploads"]}
+      | to_entries[] as $want
+      | $want.value[]
+      | select(. as $target | [$json_services[$want.key].volumes[]?.target] | index($target) | not)
+      | "\($want.key) does not mount \(.)"' --argjson json_services "$(printf '%s' "$json" | jq '.services')")
+    if [ -n "$missing" ]; then
+      result=fail
+      reason=$missing
     fi
 
     case " $* " in

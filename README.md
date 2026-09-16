@@ -233,7 +233,10 @@ your clients cache the JWKS. Never overwrite a key file in place.
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push and pull request:
+`.github/workflows/ci.yml` runs on every push and pull request. Until it is installed, the
+file lives at `ci/github-workflow.yml`; copy it into place with
+`mkdir -p .github/workflows && git mv ci/github-workflow.yml .github/workflows/ci.yml`
+(pushing it needs a token with the `workflow` scope). It runs:
 
 - `scripts/check-compose.sh`: `docker compose config` for every profile/override
   combination, plus checks for services referencing the same network twice and for named

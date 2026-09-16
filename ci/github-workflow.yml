@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose-config:
+    name: Compose combinations
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: scripts/check-compose.sh
+
+  hadolint:
+    name: Lint Dockerfile
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hadolint/hadolint-action@v3.5.0
+        with:
+          dockerfile: Dockerfile
+          config: .hadolint.yaml
+
+  build:
+    name: Build image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read Kadi version
+        id: version
+        run: echo "kadi=$(sed -n 's/^KADI_VERSION=//p' .env.example)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          build-args: KADI_VERSION=${{ steps.version.outputs.kadi }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  smoke:
+    name: Smoke test (${{ matrix.mode }})
+    needs: [compose-config, hadolint, build]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [named, bind]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Allow Elasticsearch memory maps
+        run: sudo sysctl -w vm.max_map_count=262144
+      - name: Read Kadi version
+        id: version
+        run: echo "kadi=$(sed -n 's/^KADI_VERSION=//p' .env.example)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - name: Load image from the build cache
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: kadi4mat:${{ steps.version.outputs.kadi }}
+          build-args: KADI_VERSION=${{ steps.version.outputs.kadi }}
+          cache-from: type=gha
+      - run: scripts/smoke-test.sh ${{ matrix.mode }}

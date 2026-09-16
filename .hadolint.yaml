@@ -1,0 +1,4 @@
+ignored:
+  # Pinning Debian package versions breaks the build whenever the archive moves on to a
+  # security update. The base image tag already pins the Debian release.
+  - DL3008

@@ -1,7 +1,6 @@
 .env
 .git
 .github
-ci
 .hadolint.yaml
 README.md
 docker-compose.yml

@@ -2,6 +2,7 @@
 # Starts the stack from a fresh state with the bundled PostgreSQL and checks that it works.
 #   scripts/smoke-test.sh named   # named volumes (default setup)
 #   scripts/smoke-test.sh bind    # compose.bind-mounts.yml with a fresh KADI_DATA_DIR
+#   scripts/smoke-test.sh instances  # two instances via scripts/instance.sh (smoke-test-instances.sh)
 #
 # Uses a temporary copy of the repository and its own compose project name, so an existing
 # .env, deployment or its volumes are never touched. The kadi image is built if missing.
@@ -9,6 +10,9 @@
 set -eu
 
 mode=${1:-named}
+if [ "$mode" = instances ]; then
+  exec "$(dirname "$0")/smoke-test-instances.sh"
+fi
 port=${SMOKE_PORT:-18000}
 project="kadi4mat-smoke-$mode"
 

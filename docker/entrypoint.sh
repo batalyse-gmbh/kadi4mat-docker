@@ -35,6 +35,12 @@ case "$1" in
   worker)
     exec kadi celery worker --loglevel=INFO
     ;;
+  worker-beat)
+    # Worker with the scheduler inside it (compose.embedded-beat.yml), saving the separate
+    # celerybeat container. Same schedule handling as "beat" below.
+    rm -f /tmp/celerybeat-schedule*
+    exec kadi celery worker --beat -s /tmp/celerybeat-schedule --loglevel=INFO
+    ;;
   beat)
     # Schedule state is disposable; an empty pidfile avoids stale-pid failures on restart.
     # Removing the schedule on start also backs the healthcheck in docker-compose.yml.

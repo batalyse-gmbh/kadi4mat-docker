@@ -1,0 +1,19 @@
+# Optional override: run the Celery scheduler inside the celery worker instead of a separate
+# celerybeat container, which saves one container (and one copy of the app) per instance.
+# Enable it in .env with
+#   COMPOSE_FILE=docker-compose.yml:compose.embedded-beat.yml
+#
+# Only valid while exactly one celery container runs per instance (never "--scale celery"),
+# or periodic tasks run once per worker.
+services:
+  celery:
+    command: ["worker-beat"]
+    healthcheck:
+      # The worker answers pings, and the scheduler got past startup (see celerybeat in
+      # docker-compose.yml). Unlike the separate container, a scheduler that dies later
+      # inside a running worker goes unnoticed here.
+      test: ["CMD-SHELL", "test -f /tmp/celerybeat-schedule && celery --broker \"$${KADI_REDIS_URL:-redis://redis:6379/0}\" inspect ping --destination \"celery@$${HOSTNAME}\" --timeout 10 >/dev/null"]
+
+  # Off; no one enables this profile.
+  celerybeat:
+    profiles: [separate-beat]

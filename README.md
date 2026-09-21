@@ -17,6 +17,8 @@ HTTPS reverse proxy (Caddy, Traefik, nginx, ...) instead of Apache.
 | `caddy`         | Apache as TLS proxy, **optional** (profile `caddy`)                |
 | `init-permissions` | One-shot, only with `compose.bind-mounts.yml`: creates data directories and fixes their ownership |
 
+To run several instances on one host, see [Several instances on one host](#several-instances-on-one-host).
+
 Optional features are switched on in `.env` only; `docker-compose.yml` never needs editing:
 
 | Setting in `.env`                                   | Effect                                           |
@@ -25,6 +27,7 @@ Optional features are switched on in `.env` only; `docker-compose.yml` never nee
 | `COMPOSE_FILE=...:compose.bind-mounts.yml`          | Data in host directories under `KADI_DATA_DIR`    |
 | `COMPOSE_FILE=...:compose.external-network.yml`     | Join an existing network (`EXTERNAL_NETWORK`)     |
 | `COMPOSE_FILE=...:compose.db-network.yml`           | Also join the database's network (`DB_NETWORK`)   |
+| `COMPOSE_FILE=...:compose.embedded-beat.yml`        | Scheduler inside the `celery` worker, no `celerybeat` container |
 | `KADI_OIDC_PROVIDER=true`                           | Kadi acts as an OpenID Connect provider           |
 
 `COMPOSE_FILE` is colon separated and must start with `docker-compose.yml`, e.g.
@@ -89,7 +92,8 @@ for each volume, with the stack stopped.
 
 Kadi serves plain HTTP on port 8000. Your proxy must terminate TLS: Kadi's production
 config uses secure cookies, so login does not work over plain HTTP. `KADI_SERVER_NAME` must
-be the public hostname exactly (with port, if not 443), or every route returns 404.
+be the public hostname exactly (with port, if not 443): Kadi builds every absolute URL (links,
+redirects, emails, OIDC issuer and endpoints) from it, whatever `Host` the request has.
 
 **Caddy on the host** (`KADI_HTTP_BIND=127.0.0.1:8000`, the default):
 
@@ -102,7 +106,8 @@ kadi4mat.example.edu {
 **Caddy as a container**: add `compose.external-network.yml` to `COMPOSE_FILE` and set
 `EXTERNAL_NETWORK=<caddy's network>`, then use `reverse_proxy kadi4mat-kadi:8000`. This
 attaches `kadi`, `celery` and `celerybeat` to that network (the `kadi4mat-kadi` alias is on
-`kadi` only). The `127.0.0.1:8000` port binding is harmless in that case.
+`kadi` only). The alias is `<compose project name>-kadi`, so instances started with
+`scripts/instance.sh` each get their own. The `127.0.0.1:8000` port binding is harmless in that case.
 (`compose.proxy-network.yml` and `PROXY_NETWORK` from earlier versions are replaced by this.)
 
 Attach external networks only through these override files. Adding one to the `x-kadi`
@@ -116,6 +121,75 @@ Let's Encrypt certificate for `KADI_SERVER_NAME` automatically.
 Kadi trusts the last `X-Forwarded-For` entry (one proxy hop), so **never expose port 8000
 publicly**. Direct clients could spoof their IP to bypass rate limiting. If there is a
 second proxy in front of yours (e.g. Cloudflare), configure `trusted_proxies` in Caddy.
+
+## Several instances on one host
+
+Several instances run from one checkout and one image, each as its own compose project.
+Your PostgreSQL server and reverse proxy serve all of them: one role and database per
+instance, one site block per instance.
+
+Elasticsearch, `celery` and `redis` stay per instance:
+
+- Kadi 1.12 names its search indices after its tables (`record`, `collection`, `group`,
+  `template`) and has no setting for a prefix, so instances sharing an Elasticsearch
+  would mix up each other's search results.
+- A Celery worker loads one instance's configuration (database, storage, server name) and
+  runs every task against it; it cannot serve a second instance. Redis only carries that
+  worker's queue and takes a few MB.
+
+What can be reduced is the per-instance footprint. Measured with Kadi 1.12 on a 16 CPU host
+after startup:
+
+| Per instance                              | Default                          | Reduced |
+| ----------------------------------------- | -------------------------------- | ------- |
+| `celery` + `celerybeat`                   | ~1.1 GB (10 worker processes + separate scheduler) | ~270 MB with `KADI_CELERY_CONCURRENCY=2` and `compose.embedded-beat.yml` |
+| `elasticsearch`                           | ~1.8 GB with the default 1 GB heap | lower `ES_JAVA_OPTS`, e.g. `-Xms512m -Xmx512m` for small instances |
+| `kadi`                                    | ~150 MB with `UWSGI_PROCESSES=4` | fewer processes for low traffic |
+
+`KADI_CELERY_CONCURRENCY` defaults to one worker process per CPU (at most 10); Kadi's
+background tasks (uploads, exports, cleanup) are infrequent, so 1-2 suffice for most
+instances. `compose.embedded-beat.yml` runs the scheduler inside the worker, which is safe
+as long as each instance has exactly one `celery` container.
+
+**Setup**: configure each instance in `instances/<name>.env`, copied from `.env.example`,
+and run every compose command for it through `scripts/instance.sh`:
+
+```sh
+cp .env.example instances/a.env    # then edit it
+scripts/instance.sh a up -d --build --wait
+scripts/instance.sh a exec kadi kadi users create
+scripts/instance.sh a logs -f celery
+```
+
+The script runs the instance as compose project `kadi4mat-a` and gives Compose and the
+containers the same file, so containers, volumes and networks stay apart and an instance
+can never start with another's settings. Plain `docker compose` with `.env` keeps working,
+as project `kadi4mat`. Per instance, these must differ:
+
+- `KADI_SERVER_NAME`, `KADI_SECRET_KEY`
+- `POSTGRES_DB` and `POSTGRES_USER` (see [Existing PostgreSQL server](#existing-postgresql-server))
+- `KADI_HTTP_BIND` (a free port each) for a proxy on the host; a proxy container on
+  `EXTERNAL_NETWORK` uses `kadi4mat-<name>-kadi:8000` instead
+- `KADI_DATA_DIR` with `compose.bind-mounts.yml`
+
+For example, `instances/a.env` next to your existing proxy and database containers:
+
+```sh
+COMPOSE_FILE=docker-compose.yml:compose.bind-mounts.yml:compose.external-network.yml:compose.embedded-beat.yml
+COMPOSE_PROFILES=
+KADI_SERVER_NAME=kadi-a.example.org
+KADI_DATA_DIR=/data/kadi/a
+EXTERNAL_NETWORK=proxy
+POSTGRES_HOST=my-postgres
+POSTGRES_DB=kadi_a
+POSTGRES_USER=kadi_a
+KADI_CELERY_CONCURRENCY=2
+ES_JAVA_OPTS=-Xms512m -Xmx512m
+```
+
+All instances use the one image built from this checkout, including `config/kadi.py`.
+After changing `KADI_VERSION` or the config, rebuild once and recreate every instance
+(`scripts/instance.sh <name> up -d --build`).
 
 ## Existing PostgreSQL server
 
@@ -243,3 +317,7 @@ your clients cache the JWKS. Never overwrite a key file in place.
 - Image build, then a smoke test with the bundled PostgreSQL, once with named volumes and
   once with `compose.bind-mounts.yml`: all services must become healthy and the login page
   must load. It also checks that placeholder configuration is rejected.
+- A third smoke test (`scripts/smoke-test.sh instances`) starts two instances through
+  `scripts/instance.sh` on one network, with `compose.embedded-beat.yml` and
+  `KADI_CELERY_CONCURRENCY=1`: each alias must reach its own instance, and each worker must
+  run the scheduler with one process.

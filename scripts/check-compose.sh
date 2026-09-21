@@ -7,6 +7,9 @@
 #   3. kadi, celery and celerybeat mount their data directories (a service-level list
 #      replaces, rather than extends, the one from the x-kadi anchor).
 #   4. With compose.bind-mounts.yml, no service may still use a named volume.
+#   5. With compose.embedded-beat.yml, celery runs the scheduler and celerybeat is off.
+# It also checks that scripts/instance.sh gives each instance its own project name, env file
+# and proxy alias.
 # Runs in a temporary copy of the repository, so an existing .env is never touched.
 set -eu
 
@@ -55,6 +58,8 @@ check() {
        celery: ["/opt/kadi/storage", "/opt/kadi/uploads"],
        celerybeat: ["/opt/kadi/storage", "/opt/kadi/uploads"]}
       | to_entries[] as $want
+      # compose.embedded-beat.yml switches celerybeat off; every other service must exist.
+      | select($json_services[$want.key] or $want.key != "celerybeat")
       | $want.value[]
       | select(. as $target | [$json_services[$want.key].volumes[]?.target] | index($target) | not)
       | "\($want.key) does not mount \(.)"' --argjson json_services "$(printf '%s' "$json" | jq '.services')")
@@ -74,6 +79,19 @@ check() {
         if [ -n "$named" ]; then
           result=fail
           reason=$named
+        fi
+        ;;
+    esac
+
+    case " $* " in
+      *compose.embedded-beat.yml*)
+        beat=$(printf '%s' "$json" | jq -r '
+          (if .services.celerybeat then "celerybeat is still enabled" else empty end),
+          (if .services.celery.command != ["worker-beat"]
+           then "celery does not run worker-beat" else empty end)')
+        if [ -n "$beat" ]; then
+          result=fail
+          reason=$beat
         fi
         ;;
     esac
@@ -113,6 +131,43 @@ check "external-network+db-network on the same network" fail "COMPOSE_PROFILES="
 check "everything" ok "COMPOSE_PROFILES=postgres,caddy" \
   "COMPOSE_FILE=docker-compose.yml:compose.bind-mounts.yml:compose.external-network.yml:compose.db-network.yml" \
   "KADI_DATA_DIR=/data/kadi" "EXTERNAL_NETWORK=proxy" "DB_NETWORK=postgres"
+
+check "embedded-beat" ok "COMPOSE_PROFILES=postgres" \
+  "COMPOSE_FILE=docker-compose.yml:compose.embedded-beat.yml"
+check "embedded-beat+bind-mounts+external-network" ok "COMPOSE_PROFILES=" \
+  "COMPOSE_FILE=docker-compose.yml:compose.bind-mounts.yml:compose.external-network.yml:compose.embedded-beat.yml" \
+  "KADI_DATA_DIR=/data/kadi" "EXTERNAL_NETWORK=proxy"
+
+# Two instances through scripts/instance.sh: distinct projects, env files and aliases. A
+# .env that must not reach them:
+{ base_env; echo "EXTERNAL_NETWORK=from-dot-env"; } > .env
+for instance in a b; do
+  { base_env
+    echo "COMPOSE_PROFILES="
+    echo "COMPOSE_FILE=docker-compose.yml:compose.external-network.yml"
+    echo "EXTERNAL_NETWORK=proxy"
+    # Must be ignored: the script decides both.
+    echo "COMPOSE_PROJECT_NAME=wrong"
+    echo "KADI_ENV_FILE=.env"
+  } > "instances/$instance.env"
+  if ! json=$(scripts/instance.sh "$instance" config --format json 2>config.err); then
+    got=$(cat config.err)
+  else
+    got=$(printf '%s' "$json" | jq -r --arg p "kadi4mat-$instance" '
+      (if .name != $p then "project is \(.name)" else empty end),
+      (if (.services.kadi.networks.external.aliases // []) | index("\($p)-kadi") | not
+       then "kadi has no \($p)-kadi alias on the external network" else empty end),
+      (if .services.kadi.environment.EXTERNAL_NETWORK != "proxy"
+       then "kadi does not get instances/\(.name | ltrimstr("kadi4mat-")).env" else empty end)')
+  fi
+  if [ -z "$got" ]; then
+    echo "PASS  instance $instance through scripts/instance.sh"
+  else
+    echo "FAIL  instance $instance through scripts/instance.sh"
+    printf '%s\n' "$got" | sed 's/^/      /'
+    failures=$((failures + 1))
+  fi
+done
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures check(s) failed."

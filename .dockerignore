@@ -6,3 +6,4 @@ README.md
 docker-compose.yml
 compose.*.yml
 scripts
+instances

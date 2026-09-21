@@ -54,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [named, bind]
+        mode: [named, bind, instances]
     steps:
       - uses: actions/checkout@v7
       - name: Allow Elasticsearch memory maps

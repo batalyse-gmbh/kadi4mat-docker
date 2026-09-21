@@ -4,8 +4,10 @@
 #   COMPOSE_FILE=docker-compose.yml:compose.external-network.yml
 #   EXTERNAL_NETWORK=<network name>
 #
-# On that network, kadi is reachable as "kadi4mat-kadi:8000" (proxy_pass/reverse_proxy
-# target). celery and celerybeat join too, because they talk to the database as well.
+# On that network, kadi is reachable as "<project name>-kadi:8000" (proxy_pass/reverse_proxy
+# target): "kadi4mat-kadi:8000" by default, "kadi4mat-<name>-kadi:8000" for an instance
+# started with scripts/instance.sh. celery and celerybeat join too, because they talk to the
+# database as well.
 #
 # If the database is on a different network than the proxy, also add
 # compose.db-network.yml. Never point both overrides (or the x-kadi anchor in
@@ -15,7 +17,7 @@ services:
   kadi:
     networks:
       external:
-        aliases: [kadi4mat-kadi]
+        aliases: ["${COMPOSE_PROJECT_NAME:-kadi4mat}-kadi"]
   celery:
     networks:
       external: {}

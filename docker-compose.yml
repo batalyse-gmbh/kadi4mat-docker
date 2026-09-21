@@ -1,10 +1,13 @@
+# Default project name. scripts/instance.sh gives every further instance its own through
+# COMPOSE_PROJECT_NAME, which takes precedence over this.
 name: kadi4mat
 
 x-kadi: &kadi
   image: kadi4mat:${KADI_VERSION:-1.12.0}
   restart: unless-stopped
   init: true
-  env_file: .env
+  # scripts/instance.sh points this at instances/<name>.env.
+  env_file: ${KADI_ENV_FILE:-.env}
   extra_hosts:
     # Lets POSTGRES_HOST=host.docker.internal reach a database running on the Docker host.
     - "host.docker.internal:host-gateway"

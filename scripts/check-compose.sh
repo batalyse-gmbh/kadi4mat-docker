@@ -58,8 +58,8 @@ check() {
        celery: ["/opt/kadi/storage", "/opt/kadi/uploads"],
        celerybeat: ["/opt/kadi/storage", "/opt/kadi/uploads"]}
       | to_entries[] as $want
-      # Services switched off by an override (e.g. celerybeat) mount nothing.
-      | select($json_services[$want.key])
+      # compose.embedded-beat.yml switches celerybeat off; every other service must exist.
+      | select($json_services[$want.key] or $want.key != "celerybeat")
       | $want.value[]
       | select(. as $target | [$json_services[$want.key].volumes[]?.target] | index($target) | not)
       | "\($want.key) does not mount \(.)"' --argjson json_services "$(printf '%s' "$json" | jq '.services')")

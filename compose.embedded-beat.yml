@@ -10,7 +10,8 @@ services:
     command: ["worker-beat"]
     healthcheck:
       # The worker answers pings, and the scheduler got past startup (see celerybeat in
-      # docker-compose.yml).
+      # docker-compose.yml). Unlike the separate container, a scheduler that dies later
+      # inside a running worker goes unnoticed here.
       test: ["CMD-SHELL", "test -f /tmp/celerybeat-schedule && celery --broker \"$${KADI_REDIS_URL:-redis://redis:6379/0}\" inspect ping --destination \"celery@$${HOSTNAME}\" --timeout 10 >/dev/null"]
 
   # Off; no one enables this profile.

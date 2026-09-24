@@ -129,12 +129,15 @@ rejected "has an invalid port" https://collect.ci.invalid:99999
 rejected "must be an origin" "https://collect.ci.invalid?"
 rejected "must be an origin" "https://collect.ci.invalid#"
 rejected "is the placeholder domain" https://collect.example.edu
+rejected "must not contain spaces" "https://collect.ci.invalid "
+rejected "has an invalid host" "https://collect.ci.invalid;x"
+rejected "has an invalid host" 'https://collect.ci.invalid\x'
 # Valid settings: the only possible complaint is the plugin itself (not installed in CI),
-# and the plugin gets the bare origin. exec() keeps the settings, which SystemExit would
-# discard.
+# and the plugin gets the bare origin, without the default port. exec() keeps the settings,
+# which SystemExit would discard.
 output=$(docker run --rm --entrypoint python -e KADI_SERVER_NAME=kadi.ci.invalid \
   -e KADI_SECRET_KEY=0123456789abcdef0123456789abcdef -e POSTGRES_PASSWORD=ci \
-  -e KADI_PLUGINS=collect_embed -e COLLECT_EMBED_BROWSER_BASE_URL=HTTPS://Collect.CI.invalid/ \
+  -e KADI_PLUGINS=collect_embed -e COLLECT_EMBED_BROWSER_BASE_URL=HTTPS://Collect.CI.invalid:443/ \
   -e COLLECT_EMBED_SERVER_BASE_URL= -e COLLECT_EMBED_SERVICE_SECRET=0123456789abcdef0123456789abcdef \
   "$image" -c '
 settings = {}

@@ -4,6 +4,7 @@
 # end of this file. Plugin settings go there as PLUGIN_CONFIG["<plugin>"] = {...}: this file
 # already fills PLUGIN_CONFIG, and assigning it anew drops those settings.
 import os
+import re
 from importlib.metadata import entry_points
 from urllib.parse import quote_plus
 from urllib.parse import urlsplit
@@ -130,6 +131,12 @@ for _plugin in PLUGINS:
 def _origin(name, value, https_only=False):
     """The origin of an http(s) URL as scheme://host[:port], or "" after an error. The
     plugin appends paths to it, and a CSP frame-src with a path only matches that path."""
+    # urlsplit() silently drops tabs and newlines and strips leading spaces.
+    if any(char.isspace() or not char.isprintable() for char in value):
+        _errors.append(
+            f"{name} must not contain spaces or control characters, got '{value}'."
+        )
+        return ""
     try:
         parts = urlsplit(value)
     except ValueError:
@@ -154,6 +161,8 @@ def _origin(name, value, https_only=False):
         )
     if "@" in parts.netloc:
         _errors.append(f"{name} must not contain a user name or password, got '{value}'.")
+    elif not re.fullmatch(r"(\[[0-9a-f:.]+\]|[a-z0-9._-]+)(:[0-9]*)?", parts.netloc, re.I):
+        _errors.append(f"{name} has an invalid host, got '{value}'.")
     if port == 0 or parts.netloc.endswith(":"):
         _errors.append(f"{name} has an invalid port, got '{value}'.")
     # urlsplit() drops an empty query or fragment, so look for the separators themselves.
@@ -164,7 +173,12 @@ def _origin(name, value, https_only=False):
             f"{name} is the placeholder domain '{parts.hostname}'. Set it to Collect's URL."
         )
 
-    return "" if len(_errors) > errors_before else f"{scheme}://{parts.netloc.lower()}"
+    if len(_errors) > errors_before:
+        return ""
+    host = parts.hostname  # lower case, IPv6 without brackets
+    host = f"[{host}]" if ":" in host else host
+    default_port = 443 if scheme == "https" else 80
+    return f"{scheme}://{host}" + (f":{port}" if port not in (None, default_port) else "")
 
 
 # Batalyse Collect embed (kadi-collect-embed). Only the web process serves its routes, but

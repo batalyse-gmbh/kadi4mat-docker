@@ -246,8 +246,8 @@ and ID tokens cannot be signed. All URLs must come out as `https://` on your pub
 hostname: that requires `KADI_SERVER_NAME` to be exact and the proxy to send
 `X-Forwarded-Proto` (Caddy does by default).
 
-**Registering a client application** works only in the web UI: log in as the user who
-should own the client, open *Settings → Applications* (`/settings/applications`), enter
+**Registering a client application**: register the client in the web UI. Log in as the
+user who should own the client, open *Settings → Applications* (`/settings/applications`), enter
 the redirect URIs (exact match, one per line) and tick the *OpenID Connect* scopes
 (`openid`, `profile`, `email`; stored as `oidc.openid` etc.). They only appear while the
 provider is enabled. Kadi shows the client secret once, after registering. For Batalyse
@@ -295,8 +295,12 @@ docker compose exec kadi kadi users create -d "Collect service" -u collect-servi
 ```
 
 Then log in as that user, open *Settings → Access tokens* and create a token with those
-scopes only (for Collect: `record.read` and `record.update`). Kadi shows the token once,
-after creating it. Like any user, the service user only reaches records it has a role on.
+scopes only (for Collect: `record.read` and `record.update`). The form pre-fills *Expires
+at* with four weeks from now: clear the field for a token that never expires, or pick a
+date and plan the renewal. Once the token expires, every Kadi call of the service fails
+with HTTP 401; for Collect, the embed and the file transfer with Kadi stop working. Kadi
+shows the token once, after creating it. Like any user, the service user only reaches
+records it has a role on.
 
 ## Plugins
 
@@ -337,8 +341,9 @@ COLLECT_EMBED_SERVICE_SECRET=<python3 -c "import secrets; print(secrets.token_he
   Kadi server sends it, to Collect; it never reaches a browser.
 
 With the plugin enabled, Kadi refuses to start while a URL is missing, not an origin
-(scheme, host and optional port; no path, query, fragment or credentials) or on a
-placeholder `example.*` domain, the browser URL is not https, or the secret is shorter than
+(scheme, host and optional port; no path, query, fragment, credentials or spaces) or on a
+placeholder domain (`example`, or `example.com`, `.org`, `.net`, `.edu` and their
+subdomains), the browser URL is not https, or the secret is shorter than
 32 characters. Otherwise a missing setting only shows up as an HTTP 500 once a user opens a
 record. Only the web process (`kadi`) serves the plugin's routes.
 

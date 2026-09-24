@@ -245,11 +245,25 @@ and ID tokens cannot be signed. All URLs must come out as `https://` on your pub
 hostname: that requires `KADI_SERVER_NAME` to be exact and the proxy to send
 `X-Forwarded-Proto` (Caddy does by default).
 
-**Registering a client application** works only in the web UI: log in as the user who
-should own the client, open *Settings → Applications* (`/settings/applications`), enter
-the redirect URIs (exact match, one per line) and tick the *OpenID Connect* scopes
-(`openid`, `profile`, `email`; stored as `oidc.openid` etc.). They only appear while the
-provider is enabled. Kadi shows the client secret once, after registering.
+**Registering a client application**: run `kadi-provision` in the `kadi` container. The
+client belongs to an existing user (ID or username), who can manage it in the web UI
+afterwards:
+
+```sh
+docker compose exec kadi kadi-provision oidc-client --owner 1 --name "Batalyse Collect" \
+  --redirect-uri https://collect.example.org/API/auth/oidc/callback
+```
+
+It registers the scopes `openid`, `profile` and `email` (stored as `oidc.openid` etc.) and
+prints `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`. The secret is shown only this once. Pass
+`--redirect-uri` once per URI; they must match exactly. Running the command again with the
+same owner and name registers nothing: it prints the client ID and updates the redirect
+URIs if they changed. To get a new secret, delete the client and run it again. The command
+refuses to run while the provider is disabled.
+
+In the web UI, the same works under *Settings → Applications* (`/settings/applications`)
+of the owning user: enter the redirect URIs (one per line) and tick the *OpenID Connect*
+scopes, which only appear while the provider is enabled.
 
 Things client developers need to know:
 
@@ -279,6 +293,26 @@ docker compose up -d
 
 Remove the old key from the list after the ID token lifetime (one hour) plus however long
 your clients cache the JWKS. Never overwrite a key file in place.
+
+## Access tokens for services
+
+Services that call Kadi's API, such as Collect's service account, authenticate with a
+personal access token. Give each service its own regular user, not a sysadmin (a token acts
+with all rights of its user), and a token with only the scopes the service needs:
+
+```sh
+docker compose exec kadi kadi users create -d "Collect service" -u collect-service \
+  -e collect-service@example.org
+docker compose exec kadi kadi-provision token --user collect-service --name collect \
+  --scope "record.read record.update"
+```
+
+This prints `KADI_SERVICE_TOKEN` once. Kadi reads an empty scope as *no* scopes, so
+`--scope` is required, and each scope is checked against Kadi's list. By default the token
+never expires; `--expires-days` sets an expiry. Running the command again with the same
+user and name creates nothing. If that token has other scopes or has expired, the command
+fails instead: delete the token as that user under *Settings → Access tokens* and run it
+again. Like any user, the service user only reaches records it has a role on.
 
 ## Differences from the official Apache setup
 
@@ -322,6 +356,8 @@ your clients cache the JWKS. Never overwrite a key file in place.
   once with `compose.bind-mounts.yml`: all services must become healthy and the login page
   must load. It also checks that placeholder configuration is rejected.
   PostgreSQL must keep its data in `18/docker` on its one mount.
+  `kadi-provision` must register an OIDC client whose secret the token endpoint accepts,
+  and a token with exactly the requested scopes, each only once.
 - A third smoke test (`scripts/smoke-test.sh instances`) starts two instances through
   `scripts/instance.sh` on one network, with `compose.embedded-beat.yml` and
   `KADI_CELERY_CONCURRENCY=1`: each alias must reach its own instance, and each worker must

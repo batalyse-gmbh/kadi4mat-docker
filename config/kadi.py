@@ -13,6 +13,11 @@ _EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net", "example.edu", 
 _errors = []
 
 
+def _is_example_host(host):
+    host = host.lower().rstrip(".")
+    return any(host == domain or host.endswith(f".{domain}") for domain in _EXAMPLE_DOMAINS)
+
+
 def _env(name, default=None, required=False):
     value = os.environ.get(name, default)
 
@@ -39,8 +44,7 @@ AUTH_PROVIDERS = [
 SERVER_NAME = _env("KADI_SERVER_NAME", required=True) or ""
 SECRET_KEY = _env("KADI_SECRET_KEY", required=True) or ""
 
-_host = SERVER_NAME.rsplit(":", 1)[0].lower().rstrip(".")
-if any(_host == domain or _host.endswith(f".{domain}") for domain in _EXAMPLE_DOMAINS):
+if _is_example_host(SERVER_NAME.rsplit(":", 1)[0]):
     _errors.append(
         f"KADI_SERVER_NAME is the placeholder domain '{SERVER_NAME}'. Set it to the"
         " public hostname of this instance."
@@ -120,17 +124,44 @@ for _plugin in PLUGINS:
         )
 
 
-def _origin(name, value):
-    """An origin like https://collect.example.org, without a trailing slash. The plugin
-    appends paths to it, and a CSP frame-src with a path only matches that path."""
-    parts = urlsplit(value)
+def _origin(name, value, https_only=False):
+    """The origin of an http(s) URL as scheme://host[:port], or "" after an error. The
+    plugin appends paths to it, and a CSP frame-src with a path only matches that path."""
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        _errors.append(f"{name} is not a valid URL, got '{value}'.")
+        return ""
+    try:
+        # Raises ValueError for a port that is not a number from 0 to 65535.
+        port = parts.port
+    except ValueError:
+        port = 0
 
-    if parts.scheme not in ("http", "https") or not parts.netloc:
+    scheme = parts.scheme.lower()
+    if scheme not in ("http", "https") or not parts.hostname:
         _errors.append(f"{name} must be an absolute http(s) URL, got '{value}'.")
-    elif parts.path.strip("/") or parts.query or parts.fragment:
-        _errors.append(f"{name} must be an origin without a path, got '{value}'.")
+        return ""
 
-    return value.rstrip("/")
+    errors_before = len(_errors)
+    if https_only and scheme != "https":
+        _errors.append(
+            f"{name} must use https: browsers block an http frame inside the https Kadi"
+            " page (mixed content)."
+        )
+    if "@" in parts.netloc:
+        _errors.append(f"{name} must not contain a user name or password, got '{value}'.")
+    if port == 0 or parts.netloc.endswith(":"):
+        _errors.append(f"{name} has an invalid port, got '{value}'.")
+    # urlsplit() drops an empty query or fragment, so look for the separators themselves.
+    if parts.path.strip("/") or "?" in value or "#" in value:
+        _errors.append(f"{name} must be an origin without a path, got '{value}'.")
+    if _is_example_host(parts.hostname):
+        _errors.append(
+            f"{name} is the placeholder domain '{parts.hostname}'. Set it to Collect's URL."
+        )
+
+    return "" if len(_errors) > errors_before else f"{scheme}://{parts.netloc.lower()}"
 
 
 # Batalyse Collect embed (kadi-collect-embed). Only the web process serves its routes, but
@@ -139,12 +170,9 @@ def _origin(name, value):
 if "collect_embed" in PLUGINS:
     _browser_url = _env("COLLECT_EMBED_BROWSER_BASE_URL", required=True) or ""
     if _browser_url:
-        _browser_url = _origin("COLLECT_EMBED_BROWSER_BASE_URL", _browser_url)
-        if _browser_url.startswith("http://"):
-            _errors.append(
-                "COLLECT_EMBED_BROWSER_BASE_URL must use https: browsers block an http"
-                " frame inside the https Kadi page (mixed content)."
-            )
+        _browser_url = _origin(
+            "COLLECT_EMBED_BROWSER_BASE_URL", _browser_url, https_only=True
+        )
 
     # Empty (also an empty line in .env) means: the same URL as the browser.
     _server_url = _env("COLLECT_EMBED_SERVER_BASE_URL") or ""

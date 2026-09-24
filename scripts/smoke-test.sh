@@ -107,12 +107,46 @@ for error in "COLLECT_EMBED_BROWSER_BASE_URL must be an origin" \
   "COLLECT_EMBED_SERVER_BASE_URL must be an absolute" "COLLECT_EMBED_SERVICE_SECRET must be"; do
   printf '%s' "$output" | grep -q "$error" || { echo "no error '$error': $output" >&2; exit 1; }
 done
-# Valid settings: the only possible complaint is the plugin itself (not installed in CI).
-output=$(config -e KADI_PLUGINS=collect_embed \
-  -e COLLECT_EMBED_BROWSER_BASE_URL=https://collect.ci.invalid/ -e COLLECT_EMBED_SERVER_BASE_URL= \
-  -e COLLECT_EMBED_SERVICE_SECRET=0123456789abcdef0123456789abcdef) || true
-if printf '%s\n' "$output" | grep '^  - ' | grep -v "'collect_embed', which is not installed"; then
-  echo "valid collect_embed settings were rejected" >&2
+# rejected <error> <COLLECT_EMBED_BROWSER_BASE_URL>: a browser URL refused with that error,
+# as a message and not as a traceback.
+rejected() {
+  if output=$(config -e KADI_PLUGINS=collect_embed -e "COLLECT_EMBED_BROWSER_BASE_URL=$2" \
+    -e COLLECT_EMBED_SERVICE_SECRET=0123456789abcdef0123456789abcdef); then
+    echo "COLLECT_EMBED_BROWSER_BASE_URL='$2' was accepted" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$output" | grep -q "$1" || printf '%s' "$output" | grep -q Traceback; then
+    echo "no error '$1' for '$2': $output" >&2
+    exit 1
+  fi
+}
+rejected "COLLECT_EMBED_BROWSER_BASE_URL must be set" ""
+rejected "must use https" HTTP://collect.ci.invalid
+rejected "is not a valid URL" "https://[::1"
+rejected "must not contain a user name" https://ci:secret@collect.ci.invalid
+rejected "has an invalid port" https://collect.ci.invalid:abc
+rejected "has an invalid port" https://collect.ci.invalid:99999
+rejected "must be an origin" "https://collect.ci.invalid?"
+rejected "must be an origin" "https://collect.ci.invalid#"
+rejected "is the placeholder domain" https://collect.example.edu
+# Valid settings: the only possible complaint is the plugin itself (not installed in CI),
+# and the plugin gets the bare origin. exec() keeps the settings, which SystemExit would
+# discard.
+output=$(docker run --rm --entrypoint python -e KADI_SERVER_NAME=kadi.ci.invalid \
+  -e KADI_SECRET_KEY=0123456789abcdef0123456789abcdef -e POSTGRES_PASSWORD=ci \
+  -e KADI_PLUGINS=collect_embed -e COLLECT_EMBED_BROWSER_BASE_URL=HTTPS://Collect.CI.invalid/ \
+  -e COLLECT_EMBED_SERVER_BASE_URL= -e COLLECT_EMBED_SERVICE_SECRET=0123456789abcdef0123456789abcdef \
+  "$image" -c '
+settings = {}
+try:
+    exec(open("/opt/kadi/config/kadi.py").read(), settings)
+except SystemExit as error:
+    print(error)
+print(settings["PLUGIN_CONFIG"]["collect_embed"]["browser_base_url"])' 2>&1)
+if [ "$output" != https://collect.ci.invalid ] && { [ "$(printf '%s\n' "$output" | wc -l)" -ne 3 ] \
+  || ! printf '%s\n' "$output" | sed -n 2p | grep -q "^  - KADI_PLUGINS names 'collect_embed', which is not installed" \
+  || [ "$(printf '%s\n' "$output" | sed -n 3p)" != https://collect.ci.invalid ]; }; then
+  echo "valid collect_embed settings were rejected: $output" >&2
   exit 1
 fi
 echo "plugin settings checked as expected"

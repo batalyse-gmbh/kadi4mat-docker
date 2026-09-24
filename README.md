@@ -334,9 +334,10 @@ COLLECT_EMBED_SERVICE_SECRET=<python3 -c "import secrets; print(secrets.token_he
 - `COLLECT_EMBED_SERVICE_SECRET`: must equal Collect's `KADI_EMBED_SERVICE_SECRET`. Only the
   Kadi server sends it, to Collect; it never reaches a browser.
 
-With the plugin enabled, Kadi refuses to start while a URL is missing or not an origin
-(scheme and host, no path), the browser URL is not https, or the secret is shorter than 32
-characters. Otherwise a missing setting only shows up as an HTTP 500 once a user opens a
+With the plugin enabled, Kadi refuses to start while a URL is missing, not an origin
+(scheme, host and optional port; no path, query, fragment or credentials) or on a
+placeholder `example.*` domain, the browser URL is not https, or the secret is shorter than
+32 characters. Otherwise a missing setting only shows up as an HTTP 500 once a user opens a
 record. Only the web process (`kadi`) serves the plugin's routes.
 
 To build the wheel from a checkout of the Batalyse monorepo, without writing into it:

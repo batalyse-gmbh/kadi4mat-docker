@@ -21,6 +21,16 @@ RUN python -m venv /opt/kadi/venv \
     && /opt/kadi/venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/kadi/venv/bin/pip install --no-cache-dir "kadi==${KADI_VERSION}"
 
+# Kadi plugin wheels from plugins/ (none by default). Resolving them together with the
+# pinned kadi installs their dependencies but fails the build rather than replace kadi or
+# change a version kadi pins; a plain constraint on kadi alone would not protect the latter.
+COPY plugins/ /tmp/plugins/
+RUN set -- /tmp/plugins/*.whl \
+    && if [ -e "$1" ]; then \
+         /opt/kadi/venv/bin/pip install --no-cache-dir "kadi==${KADI_VERSION}" "$@"; \
+       fi \
+    && /opt/kadi/venv/bin/pip check
+
 ###############################################################################
 FROM python:${PYTHON_VERSION}-slim-trixie
 

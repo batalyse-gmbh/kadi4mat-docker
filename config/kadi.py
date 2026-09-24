@@ -2,7 +2,9 @@
 # environment (see .env.example). Any other option from
 # https://kadi.readthedocs.io/en/stable/installation/configuration.html can be added here.
 import os
+from importlib.metadata import entry_points
 from urllib.parse import quote_plus
+from urllib.parse import urlsplit
 
 
 # Placeholders from .env.example that must never reach a running instance.
@@ -101,6 +103,68 @@ if _env("KADI_CELERY_CONCURRENCY"):
         _errors.append("KADI_CELERY_CONCURRENCY must be a positive number.")
 RATELIMIT_STORAGE_URI = _env("KADI_REDIS_URL", "redis://redis:6379/0")
 ELASTICSEARCH_HOSTS = [_env("KADI_ELASTICSEARCH_HOST", "http://elasticsearch:9200")]
+
+# Plugins, by entry point name: Kadi's built-in ones (influxdb, s3, tib_ts, zenodo) or
+# wheels installed from plugins/. Kadi silently skips a name it cannot find, so check here.
+PLUGINS = [
+    name.strip() for name in _env("KADI_PLUGINS", "").split(",") if name.strip()
+]
+PLUGIN_CONFIG = {}
+
+_installed_plugins = sorted({ep.name for ep in entry_points(group="kadi_plugins")})
+for _plugin in PLUGINS:
+    if _plugin not in _installed_plugins:
+        _errors.append(
+            f"KADI_PLUGINS names '{_plugin}', which is not installed. Put its wheel into"
+            f" plugins/ and rebuild the image. Installed: {', '.join(_installed_plugins)}."
+        )
+
+
+def _origin(name, value):
+    """An origin like https://collect.example.org, without a trailing slash. The plugin
+    appends paths to it, and a CSP frame-src with a path only matches that path."""
+    parts = urlsplit(value)
+
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        _errors.append(f"{name} must be an absolute http(s) URL, got '{value}'.")
+    elif parts.path.strip("/") or parts.query or parts.fragment:
+        _errors.append(f"{name} must be an origin without a path, got '{value}'.")
+
+    return value.rstrip("/")
+
+
+# Batalyse Collect embed (kadi-collect-embed). Only the web process serves its routes, but
+# every process checks the settings, so a mistake stops the stack at startup instead of
+# showing up as HTTP 500 on a record page.
+if "collect_embed" in PLUGINS:
+    _browser_url = _env("COLLECT_EMBED_BROWSER_BASE_URL", required=True) or ""
+    if _browser_url:
+        _browser_url = _origin("COLLECT_EMBED_BROWSER_BASE_URL", _browser_url)
+        if _browser_url.startswith("http://"):
+            _errors.append(
+                "COLLECT_EMBED_BROWSER_BASE_URL must use https: browsers block an http"
+                " frame inside the https Kadi page (mixed content)."
+            )
+
+    # Empty (also an empty line in .env) means: the same URL as the browser.
+    _server_url = _env("COLLECT_EMBED_SERVER_BASE_URL") or ""
+    if _server_url:
+        _server_url = _origin("COLLECT_EMBED_SERVER_BASE_URL", _server_url)
+    else:
+        _server_url = _browser_url
+
+    _service_secret = _env("COLLECT_EMBED_SERVICE_SECRET", "")
+    if _service_secret == _PLACEHOLDER or len(_service_secret) < 32:
+        _errors.append(
+            "COLLECT_EMBED_SERVICE_SECRET must be a random value of at least 32 characters,"
+            " equal to Collect's KADI_EMBED_SERVICE_SECRET."
+        )
+
+    PLUGIN_CONFIG["collect_embed"] = {
+        "browser_base_url": _browser_url,
+        "server_base_url": _server_url,
+        "service_secret": _service_secret,
+    }
 
 SMTP_HOST = _env("KADI_SMTP_HOST", "localhost")
 SMTP_PORT = int(_env("KADI_SMTP_PORT", "25"))

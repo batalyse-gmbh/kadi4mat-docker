@@ -29,6 +29,7 @@ Optional features are switched on in `.env` only; `docker-compose.yml` never nee
 | `COMPOSE_FILE=...:compose.db-network.yml`           | Also join the database's network (`DB_NETWORK`)   |
 | `COMPOSE_FILE=...:compose.embedded-beat.yml`        | Scheduler inside the `celery` worker, no `celerybeat` container |
 | `KADI_OIDC_PROVIDER=true`                           | Kadi acts as an OpenID Connect provider           |
+| `KADI_PLUGINS=...`                                  | Kadi plugins, e.g. the [Batalyse Collect embed](#batalyse-collect-embed) |
 
 `COMPOSE_FILE` is colon separated and must start with `docker-compose.yml`, e.g.
 `COMPOSE_FILE=docker-compose.yml:compose.bind-mounts.yml:compose.external-network.yml`.
@@ -314,6 +315,102 @@ user and name creates nothing. If that token has other scopes or has expired, th
 fails instead: delete the token as that user under *Settings → Access tokens* and run it
 again. Like any user, the service user only reaches records it has a role on.
 
+## Plugins
+
+Kadi's built-in plugins (`influxdb`, `s3`, `tib_ts`, `zenodo`) are part of the image. Any
+other plugin is installed from a wheel: put the `.whl` file into `plugins/` and rebuild
+(`docker compose up -d --build`). The build installs the wheels together with the pinned
+`kadi` version. That installs a plugin's dependencies, but fails the build rather than
+replace Kadi or change a version Kadi pins. Git ignores `plugins/*.whl`.
+
+Enable plugins with `KADI_PLUGINS` (comma separated). Kadi silently skips a name it cannot
+find, so the config refuses to start if a plugin is not installed and lists the installed
+ones. Plugin settings not covered below go into `PLUGIN_CONFIG` in `config/kadi.py`.
+
+## Batalyse Collect embed
+
+The `kadi-collect-embed` plugin shows Batalyse Collect's form on every record page, in a
+frame, and signs the Kadi user in to Collect. No token appears in the page: the Kadi server
+requests a short-lived Collect session (`POST /API/kadi/embed-session`) with a shared
+secret. The plugin is not on PyPI: Batalyse supplies it as a wheel
+(`kadi_collect_embed-<version>-py3-none-any.whl`). Put it into `plugins/`, set it up in
+`.env` and rebuild (`docker compose up -d --build`):
+
+```sh
+KADI_PLUGINS=collect_embed
+COLLECT_EMBED_BROWSER_BASE_URL=https://collect.example.org
+COLLECT_EMBED_SERVER_BASE_URL=
+COLLECT_EMBED_SERVICE_SECRET=<python3 -c "import secrets; print(secrets.token_hex(32))">
+```
+
+- `COLLECT_EMBED_BROWSER_BASE_URL`: Collect's origin as users' browsers load it. It is the
+  frame's source and the origin added to Kadi's CSP `frame-src`. It must be https: Kadi is
+  served over https, and browsers block an http frame inside it.
+- `COLLECT_EMBED_SERVER_BASE_URL`: Collect's origin as the `kadi` container reaches it, for
+  the session request. Empty means the browser URL.
+- `COLLECT_EMBED_SERVICE_SECRET`: must equal Collect's `KADI_EMBED_SERVICE_SECRET`. Only the
+  Kadi server sends it, to Collect; it never reaches a browser.
+
+With the plugin enabled, Kadi refuses to start while a URL is missing or not an origin
+(scheme and host, no path), the browser URL is not https, or the secret is shorter than 32
+characters. Otherwise a missing setting only shows up as an HTTP 500 once a user opens a
+record. Only the web process (`kadi`) serves the plugin's routes.
+
+To build the wheel from a checkout of the Batalyse monorepo, without writing into it:
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+  -v <monorepo>/integrations/kadi-collect-embed:/src:ro -v "$PWD/plugins:/out" \
+  python:3.13-slim-trixie sh -c 'cp -r /src /tmp/src && pip wheel --no-deps -w /out /tmp/src'
+```
+
+Collect needs, in its own configuration:
+
+- `OIDC_ISSUER_URL=https://<KADI_SERVER_NAME>`: Collect must use this Kadi as its OIDC
+  login provider, with the same origin as the Kadi URL browsers use (`KADI_BROWSER_HOST`),
+  or it refuses the embed session. Register Collect as a client with
+  `kadi-provision oidc-client` and the redirect URI `<Collect URL>/API/auth/oidc/callback`
+  (see [OIDC provider](#oidc-provider)).
+- `KADI_EMBED_SERVICE_SECRET`: the same value as `COLLECT_EMBED_SERVICE_SECRET`.
+- `KADI_SERVICE_TOKEN`: a token with `record.read record.update` of a dedicated user (see
+  [Access tokens for services](#access-tokens-for-services)). Collect reads and writes the
+  records users open in the embed with it, so that user needs access to them: share the
+  records with it (directly or through a group), or give it the system role `admin`,
+  which grants access to every record (sysadmins can change a user's system role in the
+  web UI). The token's scopes still limit it to reading and updating records.
+
+How Kadi users map to Collect accounts is described in the plugin's README.
+
+### Collect on the same host
+
+With Collect's containers on the same host, behind the same reverse proxy, Collect's
+settings for `https://kadi.example.org` are:
+
+| Collect setting     | Value                                                            |
+| ------------------- | ---------------------------------------------------------------- |
+| `KADI_HOST`         | `https://kadi.example.org`, or the internal alias (see below)    |
+| `KADI_BROWSER_HOST` | `https://kadi.example.org`                                       |
+| `OIDC_ISSUER_URL`   | `https://kadi.example.org`                                       |
+
+Public URLs work as long as the containers can resolve and reach the public hostnames: the
+requests leave through the proxy and come back in. The OIDC issuer must be the public URL in
+any case, because Kadi builds the issuer and all OIDC endpoints from `KADI_SERVER_NAME`.
+
+Internal addresses avoid that detour when Collect's container shares a Docker network with
+`kadi` (`compose.external-network.yml`, e.g. the proxy's network):
+
+- `KADI_HOST=http://kadi4mat-kadi:8000` (the [alias](#reverse-proxy)), plus
+  `KADI_TRUSTED_HOSTS=kadi4mat-kadi` for Collect, whose SSRF guard refuses private
+  plain-http addresses otherwise. Tested on the Kadi side only: through the alias, a token
+  could read a record, upload a file and download it. Kadi answers whatever the `Host`
+  header, but the absolute URLs in its responses (`_links`, `_actions`) read
+  `http://<KADI_SERVER_NAME>/...`, because no proxy sets `X-Forwarded-Proto`. Collect only
+  follows action URLs on its `KADI_HOST` origin and builds the paths itself otherwise, so
+  this should not matter. Collect has not been run against this setup, though. The token
+  travels unencrypted on that Docker network.
+- `COLLECT_EMBED_SERVER_BASE_URL=http://<Collect container>:<port>` on the same network, for
+  the session request. Untested.
+
 ## Differences from the official Apache setup
 
 - **File downloads are streamed by uWSGI**, not handed to the web server via `X-Sendfile`
@@ -355,6 +452,8 @@ again. Like any user, the service user only reaches records it has a role on.
 - Image build, then a smoke test with the bundled PostgreSQL, once with named volumes and
   once with `compose.bind-mounts.yml`: all services must become healthy and the login page
   must load. It also checks that placeholder configuration is rejected.
+  So are an uninstalled plugin in `KADI_PLUGINS` and invalid `COLLECT_EMBED_*` settings
+  (the plugin itself is not in CI).
   PostgreSQL must keep its data in `18/docker` on its one mount.
   `kadi-provision` must register an OIDC client whose secret the token endpoint accepts,
   and a token with exactly the requested scopes, each only once.

@@ -82,6 +82,41 @@ for name in KADI_SERVER_NAME KADI_SECRET_KEY POSTGRES_PASSWORD; do
 done
 echo "rejected as expected"
 
+echo "--- plugin configuration"
+# config <docker run options...>: loads config/kadi.py with valid base settings.
+config() {
+  docker run --rm --entrypoint python -e KADI_SERVER_NAME=kadi.ci.invalid \
+    -e KADI_SECRET_KEY=0123456789abcdef0123456789abcdef -e POSTGRES_PASSWORD=ci \
+    "$@" "$image" /opt/kadi/config/kadi.py 2>&1
+}
+config -e KADI_PLUGINS=zenodo,influxdb >/dev/null \
+  || { echo "Kadi's built-in plugins were rejected" >&2; exit 1; }
+if output=$(config -e KADI_PLUGINS=zenodo,no_such_plugin); then
+  echo "an uninstalled plugin was accepted" >&2
+  exit 1
+fi
+printf '%s' "$output" | grep -q "'no_such_plugin', which is not installed"
+if output=$(config -e KADI_PLUGINS=collect_embed \
+  -e COLLECT_EMBED_BROWSER_BASE_URL=http://collect.ci.invalid/form \
+  -e COLLECT_EMBED_SERVER_BASE_URL=collect:8080 -e COLLECT_EMBED_SERVICE_SECRET=change-me); then
+  echo "invalid collect_embed settings were accepted" >&2
+  exit 1
+fi
+for error in "COLLECT_EMBED_BROWSER_BASE_URL must be an origin" \
+  "COLLECT_EMBED_BROWSER_BASE_URL must use https" \
+  "COLLECT_EMBED_SERVER_BASE_URL must be an absolute" "COLLECT_EMBED_SERVICE_SECRET must be"; do
+  printf '%s' "$output" | grep -q "$error" || { echo "no error '$error': $output" >&2; exit 1; }
+done
+# Valid settings: the only possible complaint is the plugin itself (not installed in CI).
+output=$(config -e KADI_PLUGINS=collect_embed \
+  -e COLLECT_EMBED_BROWSER_BASE_URL=https://collect.ci.invalid/ -e COLLECT_EMBED_SERVER_BASE_URL= \
+  -e COLLECT_EMBED_SERVICE_SECRET=0123456789abcdef0123456789abcdef) || true
+if printf '%s\n' "$output" | grep '^  - ' | grep -v "'collect_embed', which is not installed"; then
+  echo "valid collect_embed settings were rejected" >&2
+  exit 1
+fi
+echo "plugin settings checked as expected"
+
 echo "--- starting stack ($mode)"
 compose up --detach --wait --wait-timeout "${WAIT_TIMEOUT:-600}"
 compose ps

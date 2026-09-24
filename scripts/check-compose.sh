@@ -5,7 +5,8 @@
 #      anchor and once through an override). "config" accepts that, and how Compose then
 #      resolves it depends on its version.
 #   3. kadi, celery and celerybeat mount their data directories (a service-level list
-#      replaces, rather than extends, the one from the x-kadi anchor).
+#      replaces, rather than extends, the one from the x-kadi anchor), and postgres mounts
+#      /var/lib/postgresql (postgres:18 refuses to start with a mount at .../data).
 #   4. With compose.bind-mounts.yml, no service may still use a named volume.
 #   5. With compose.embedded-beat.yml, celery runs the scheduler and celerybeat is off.
 # It also checks that scripts/instance.sh gives each instance its own project name, env file
@@ -56,10 +57,12 @@ check() {
     missing=$(printf '%s' "$json" | jq -r '
       {kadi: ["/opt/kadi/storage", "/opt/kadi/uploads", "/opt/kadi/oidc"],
        celery: ["/opt/kadi/storage", "/opt/kadi/uploads"],
-       celerybeat: ["/opt/kadi/storage", "/opt/kadi/uploads"]}
+       celerybeat: ["/opt/kadi/storage", "/opt/kadi/uploads"],
+       postgres: ["/var/lib/postgresql"]}
       | to_entries[] as $want
-      # compose.embedded-beat.yml switches celerybeat off; every other service must exist.
-      | select($json_services[$want.key] or $want.key != "celerybeat")
+      # compose.embedded-beat.yml switches celerybeat off and postgres is a profile; every
+      # other service must exist.
+      | select($json_services[$want.key] or ($want.key | IN("celerybeat", "postgres") | not))
       | $want.value[]
       | select(. as $target | [$json_services[$want.key].volumes[]?.target] | index($target) | not)
       | "\($want.key) does not mount \(.)"' --argjson json_services "$(printf '%s' "$json" | jq '.services')")

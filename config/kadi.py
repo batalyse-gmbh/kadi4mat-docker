@@ -1,14 +1,24 @@
 # Kadi4Mat configuration. This is a Python file, values are read from the container
 # environment (see .env.example). Any other option from
-# https://kadi.readthedocs.io/en/stable/installation/configuration.html can be added here.
+# https://kadi.readthedocs.io/en/stable/installation/configuration.html can be added at the
+# end of this file. Plugin settings go there as PLUGIN_CONFIG["<plugin>"] = {...}: this file
+# already fills PLUGIN_CONFIG, and assigning it anew drops those settings.
 import os
+import re
+from importlib.metadata import entry_points
 from urllib.parse import quote_plus
+from urllib.parse import urlsplit
 
 
 # Placeholders from .env.example that must never reach a running instance.
 _PLACEHOLDER = "change-me"
 _EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net", "example.edu", "example")
 _errors = []
+
+
+def _is_example_host(host):
+    host = host.lower().rstrip(".")
+    return any(host == domain or host.endswith(f".{domain}") for domain in _EXAMPLE_DOMAINS)
 
 
 def _env(name, default=None, required=False):
@@ -37,8 +47,7 @@ AUTH_PROVIDERS = [
 SERVER_NAME = _env("KADI_SERVER_NAME", required=True) or ""
 SECRET_KEY = _env("KADI_SECRET_KEY", required=True) or ""
 
-_host = SERVER_NAME.rsplit(":", 1)[0].lower().rstrip(".")
-if any(_host == domain or _host.endswith(f".{domain}") for domain in _EXAMPLE_DOMAINS):
+if _is_example_host(SERVER_NAME.rsplit(":", 1)[0]):
     _errors.append(
         f"KADI_SERVER_NAME is the placeholder domain '{SERVER_NAME}'. Set it to the"
         " public hostname of this instance."
@@ -101,6 +110,106 @@ if _env("KADI_CELERY_CONCURRENCY"):
         _errors.append("KADI_CELERY_CONCURRENCY must be a positive number.")
 RATELIMIT_STORAGE_URI = _env("KADI_REDIS_URL", "redis://redis:6379/0")
 ELASTICSEARCH_HOSTS = [_env("KADI_ELASTICSEARCH_HOST", "http://elasticsearch:9200")]
+
+# Plugins, by entry point name: Kadi's built-in ones (influxdb, s3, tib_ts, zenodo) or
+# wheels installed from plugins/. Kadi silently skips a name it cannot find, so check here.
+PLUGINS = [
+    name.strip() for name in _env("KADI_PLUGINS", "").split(",") if name.strip()
+]
+# Add settings of other plugins at the end of this file, see the header.
+PLUGIN_CONFIG = {}
+
+_installed_plugins = sorted({ep.name for ep in entry_points(group="kadi_plugins")})
+for _plugin in PLUGINS:
+    if _plugin not in _installed_plugins:
+        _errors.append(
+            f"KADI_PLUGINS names '{_plugin}', which is not installed. Put its wheel into"
+            f" plugins/ and rebuild the image. Installed: {', '.join(_installed_plugins)}."
+        )
+
+
+def _origin(name, value, https_only=False):
+    """The origin of an http(s) URL as scheme://host[:port], or "" after an error. The
+    plugin appends paths to it, and a CSP frame-src with a path only matches that path."""
+    # urlsplit() silently drops tabs and newlines and strips leading spaces.
+    if any(char.isspace() or not char.isprintable() for char in value):
+        _errors.append(
+            f"{name} must not contain spaces or control characters, got '{value}'."
+        )
+        return ""
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        _errors.append(f"{name} is not a valid URL, got '{value}'.")
+        return ""
+    try:
+        # Raises ValueError for a port that is not a number from 0 to 65535.
+        port = parts.port
+    except ValueError:
+        port = 0
+
+    scheme = parts.scheme.lower()
+    if scheme not in ("http", "https") or not parts.hostname:
+        _errors.append(f"{name} must be an absolute http(s) URL, got '{value}'.")
+        return ""
+
+    errors_before = len(_errors)
+    if https_only and scheme != "https":
+        _errors.append(
+            f"{name} must use https: browsers block an http frame inside the https Kadi"
+            " page (mixed content)."
+        )
+    if "@" in parts.netloc:
+        _errors.append(f"{name} must not contain a user name or password, got '{value}'.")
+    elif not re.fullmatch(r"(\[[0-9a-f:.]+\]|[a-z0-9._-]+)(:[0-9]*)?", parts.netloc, re.I):
+        _errors.append(f"{name} has an invalid host, got '{value}'.")
+    if port == 0 or parts.netloc.endswith(":"):
+        _errors.append(f"{name} has an invalid port, got '{value}'.")
+    # urlsplit() drops an empty query or fragment, so look for the separators themselves.
+    if parts.path.strip("/") or "?" in value or "#" in value:
+        _errors.append(f"{name} must be an origin without a path, got '{value}'.")
+    if _is_example_host(parts.hostname):
+        _errors.append(
+            f"{name} is the placeholder domain '{parts.hostname}'. Set it to Collect's URL."
+        )
+
+    if len(_errors) > errors_before:
+        return ""
+    host = parts.hostname  # lower case, IPv6 without brackets
+    host = f"[{host}]" if ":" in host else host
+    default_port = 443 if scheme == "https" else 80
+    return f"{scheme}://{host}" + (f":{port}" if port not in (None, default_port) else "")
+
+
+# Batalyse Collect embed (kadi-collect-embed). Only the web process serves its routes, but
+# every process checks the settings, so a mistake stops the stack at startup instead of
+# showing up as HTTP 500 on a record page.
+if "collect_embed" in PLUGINS:
+    _browser_url = _env("COLLECT_EMBED_BROWSER_BASE_URL", required=True) or ""
+    if _browser_url:
+        _browser_url = _origin(
+            "COLLECT_EMBED_BROWSER_BASE_URL", _browser_url, https_only=True
+        )
+
+    # Empty (also an empty line in .env) means: the same URL as the browser.
+    _server_url = _env("COLLECT_EMBED_SERVER_BASE_URL") or ""
+    if _server_url:
+        _server_url = _origin("COLLECT_EMBED_SERVER_BASE_URL", _server_url)
+    else:
+        _server_url = _browser_url
+
+    _service_secret = _env("COLLECT_EMBED_SERVICE_SECRET", "")
+    if _service_secret == _PLACEHOLDER or len(_service_secret) < 32:
+        _errors.append(
+            "COLLECT_EMBED_SERVICE_SECRET must be a random value of at least 32 characters,"
+            " equal to Collect's KADI_EMBED_SERVICE_SECRET."
+        )
+
+    PLUGIN_CONFIG["collect_embed"] = {
+        "browser_base_url": _browser_url,
+        "server_base_url": _server_url,
+        "service_secret": _service_secret,
+    }
 
 SMTP_HOST = _env("KADI_SMTP_HOST", "localhost")
 SMTP_PORT = int(_env("KADI_SMTP_PORT", "25"))

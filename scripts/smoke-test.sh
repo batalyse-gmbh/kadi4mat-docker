@@ -82,6 +82,78 @@ for name in KADI_SERVER_NAME KADI_SECRET_KEY POSTGRES_PASSWORD; do
 done
 echo "rejected as expected"
 
+echo "--- plugin configuration"
+# config <docker run options...>: loads config/kadi.py with valid base settings.
+config() {
+  docker run --rm --entrypoint python -e KADI_SERVER_NAME=kadi.ci.invalid \
+    -e KADI_SECRET_KEY=0123456789abcdef0123456789abcdef -e POSTGRES_PASSWORD=ci \
+    "$@" "$image" /opt/kadi/config/kadi.py 2>&1
+}
+config -e KADI_PLUGINS=zenodo,influxdb >/dev/null \
+  || { echo "Kadi's built-in plugins were rejected" >&2; exit 1; }
+if output=$(config -e KADI_PLUGINS=zenodo,no_such_plugin); then
+  echo "an uninstalled plugin was accepted" >&2
+  exit 1
+fi
+printf '%s' "$output" | grep -q "'no_such_plugin', which is not installed"
+if output=$(config -e KADI_PLUGINS=collect_embed \
+  -e COLLECT_EMBED_BROWSER_BASE_URL=http://collect.ci.invalid/form \
+  -e COLLECT_EMBED_SERVER_BASE_URL=collect:8080 -e COLLECT_EMBED_SERVICE_SECRET=change-me); then
+  echo "invalid collect_embed settings were accepted" >&2
+  exit 1
+fi
+for error in "COLLECT_EMBED_BROWSER_BASE_URL must be an origin" \
+  "COLLECT_EMBED_BROWSER_BASE_URL must use https" \
+  "COLLECT_EMBED_SERVER_BASE_URL must be an absolute" "COLLECT_EMBED_SERVICE_SECRET must be"; do
+  printf '%s' "$output" | grep -q "$error" || { echo "no error '$error': $output" >&2; exit 1; }
+done
+# rejected <error> <COLLECT_EMBED_BROWSER_BASE_URL>: a browser URL refused with that error,
+# as a message and not as a traceback.
+rejected() {
+  if output=$(config -e KADI_PLUGINS=collect_embed -e "COLLECT_EMBED_BROWSER_BASE_URL=$2" \
+    -e COLLECT_EMBED_SERVICE_SECRET=0123456789abcdef0123456789abcdef); then
+    echo "COLLECT_EMBED_BROWSER_BASE_URL='$2' was accepted" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$output" | grep -q "$1" || printf '%s' "$output" | grep -q Traceback; then
+    echo "no error '$1' for '$2': $output" >&2
+    exit 1
+  fi
+}
+rejected "COLLECT_EMBED_BROWSER_BASE_URL must be set" ""
+rejected "must use https" HTTP://collect.ci.invalid
+rejected "is not a valid URL" "https://[::1"
+rejected "must not contain a user name" https://ci:secret@collect.ci.invalid
+rejected "has an invalid port" https://collect.ci.invalid:abc
+rejected "has an invalid port" https://collect.ci.invalid:99999
+rejected "must be an origin" "https://collect.ci.invalid?"
+rejected "must be an origin" "https://collect.ci.invalid#"
+rejected "is the placeholder domain" https://collect.example.edu
+rejected "must not contain spaces" "https://collect.ci.invalid "
+rejected "has an invalid host" "https://collect.ci.invalid;x"
+rejected "has an invalid host" 'https://collect.ci.invalid\x'
+# Valid settings: the only possible complaint is the plugin itself (not installed in CI),
+# and the plugin gets the bare origin, without the default port. exec() keeps the settings,
+# which SystemExit would discard.
+output=$(docker run --rm --entrypoint python -e KADI_SERVER_NAME=kadi.ci.invalid \
+  -e KADI_SECRET_KEY=0123456789abcdef0123456789abcdef -e POSTGRES_PASSWORD=ci \
+  -e KADI_PLUGINS=collect_embed -e COLLECT_EMBED_BROWSER_BASE_URL=HTTPS://Collect.CI.invalid:443/ \
+  -e COLLECT_EMBED_SERVER_BASE_URL= -e COLLECT_EMBED_SERVICE_SECRET=0123456789abcdef0123456789abcdef \
+  "$image" -c '
+settings = {}
+try:
+    exec(open("/opt/kadi/config/kadi.py").read(), settings)
+except SystemExit as error:
+    print(error)
+print(settings["PLUGIN_CONFIG"]["collect_embed"]["browser_base_url"])' 2>&1)
+if [ "$output" != https://collect.ci.invalid ] && { [ "$(printf '%s\n' "$output" | wc -l)" -ne 3 ] \
+  || ! printf '%s\n' "$output" | sed -n 2p | grep -q "^  - KADI_PLUGINS names 'collect_embed', which is not installed" \
+  || [ "$(printf '%s\n' "$output" | sed -n 3p)" != https://collect.ci.invalid ]; }; then
+  echo "valid collect_embed settings were rejected: $output" >&2
+  exit 1
+fi
+echo "plugin settings checked as expected"
+
 echo "--- starting stack ($mode)"
 compose up --detach --wait --wait-timeout "${WAIT_TIMEOUT:-600}"
 compose ps
@@ -114,12 +186,20 @@ echo "issuer and JWKS ok: $(echo "$jwks" | jq -c '.keys[0] | {kid, kty, alg}')"
 compose exec -T kadi sh -c 'stat -c "%a %u" /opt/kadi/oidc/signing-key.pem' | grep -qx "600 10001"
 echo "signing key generated with mode 600"
 
+echo "--- postgres 18 layout"
+compose exec -T postgres cat /var/lib/postgresql/18/docker/PG_VERSION | grep -qx 18
+mounts=$(docker inspect --format '{{range .Mounts}}{{.Destination}} {{end}}' "$(compose ps -q postgres)")
+echo "postgres mounts: $mounts"
+[ "$mounts" = "/var/lib/postgresql " ]
+
 if [ "$mode" = bind ]; then
   echo "--- data directory ownership"
   docker run --rm -v "$data:/data:ro" alpine:3.24 stat -c '%n %u:%g' \
     /data/postgres /data/redis /data/elasticsearch /data/storage /data/uploads
   [ -n "$(docker run --rm -v "$data:/data:ro" alpine:3.24 find /data/elasticsearch -name node.lock)" ]
   echo "elasticsearch wrote its node.lock"
+  [ -n "$(docker run --rm -v "$data:/data:ro" alpine:3.24 find /data/postgres/18/docker -name PG_VERSION)" ]
+  echo "postgres wrote its data to postgres/18/docker"
 fi
 
 echo "Smoke test ($mode) passed."

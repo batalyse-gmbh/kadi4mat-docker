@@ -1,6 +1,8 @@
 # Kadi4Mat configuration. This is a Python file, values are read from the container
 # environment (see .env.example). Any other option from
-# https://kadi.readthedocs.io/en/stable/installation/configuration.html can be added here.
+# https://kadi.readthedocs.io/en/stable/installation/configuration.html can be added at the
+# end of this file. Plugin settings go there as PLUGIN_CONFIG["<plugin>"] = {...}: this file
+# already fills PLUGIN_CONFIG, and assigning it anew drops those settings.
 import os
 from importlib.metadata import entry_points
 from urllib.parse import quote_plus
@@ -113,6 +115,7 @@ ELASTICSEARCH_HOSTS = [_env("KADI_ELASTICSEARCH_HOST", "http://elasticsearch:920
 PLUGINS = [
     name.strip() for name in _env("KADI_PLUGINS", "").split(",") if name.strip()
 ]
+# Add settings of other plugins at the end of this file, see the header.
 PLUGIN_CONFIG = {}
 
 _installed_plugins = sorted({ep.name for ep in entry_points(group="kadi_plugins")})

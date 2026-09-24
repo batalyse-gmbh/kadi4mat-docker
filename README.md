@@ -308,7 +308,9 @@ replace Kadi or change a version Kadi pins. Git ignores `plugins/*.whl`.
 
 Enable plugins with `KADI_PLUGINS` (comma separated). Kadi silently skips a name it cannot
 find, so the config refuses to start if a plugin is not installed and lists the installed
-ones. Plugin settings not covered below go into `PLUGIN_CONFIG` in `config/kadi.py`.
+ones. Plugin settings not covered below go at the end of `config/kadi.py`, one entry per
+plugin: `PLUGIN_CONFIG["<plugin>"] = {...}`. The file already fills `PLUGIN_CONFIG` (e.g.
+for the Collect embed), so never assign `PLUGIN_CONFIG = {...}` itself.
 
 ## Batalyse Collect embed
 
@@ -413,7 +415,7 @@ Internal addresses avoid that detour when Collect's container shares a Docker ne
   does not enforce bootstrap checks (not tested). `ELASTICSEARCH_VERSION` selects
   the image tag; stay on 8.x, Kadi 1.12 does not support Elasticsearch 9.
 - Other [configuration options](https://kadi.readthedocs.io/en/stable/installation/configuration.html)
-  go into `config/kadi.py`, then run `docker compose up -d --build`.
+  go at the end of `config/kadi.py`, then run `docker compose up -d --build`.
 - Upgrade: change `KADI_VERSION` in `.env`, then run `docker compose up -d --build`.
 - The bundled PostgreSQL is pinned to major version 18. A newer major version cannot read
   its data directory: moving on needs `pg_upgrade` or a dump and restore, never just a new

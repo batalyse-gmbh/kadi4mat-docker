@@ -9,8 +9,8 @@
 # but only if some file inside has the wrong owner, so restored backups get fixed as well.
 #
 # Owners, as used by the pinned images:
-#   postgres/       999:999    (postgres:17)
-#   redis/          999:999    (redis:7)
+#   postgres/       999:999    (postgres:18)
+#   redis/          999:999    (redis:8)
 #   elasticsearch/  1000:0     (elasticsearch 8.x)
 #   storage/        10001:10001 (kadi)
 #   uploads/        10001:10001 (kadi)
@@ -56,7 +56,7 @@ services:
 
   postgres:
     volumes:
-      - ${KADI_DATA_DIR}/postgres:/var/lib/postgresql/data
+      - ${KADI_DATA_DIR}/postgres:/var/lib/postgresql
     depends_on: *wait-for-permissions
 
   redis:

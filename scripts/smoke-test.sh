@@ -114,12 +114,20 @@ echo "issuer and JWKS ok: $(echo "$jwks" | jq -c '.keys[0] | {kid, kty, alg}')"
 compose exec -T kadi sh -c 'stat -c "%a %u" /opt/kadi/oidc/signing-key.pem' | grep -qx "600 10001"
 echo "signing key generated with mode 600"
 
+echo "--- postgres 18 layout"
+compose exec -T postgres cat /var/lib/postgresql/18/docker/PG_VERSION | grep -qx 18
+mounts=$(docker inspect --format '{{range .Mounts}}{{.Destination}} {{end}}' "$(compose ps -q postgres)")
+echo "postgres mounts: $mounts"
+[ "$mounts" = "/var/lib/postgresql " ]
+
 if [ "$mode" = bind ]; then
   echo "--- data directory ownership"
   docker run --rm -v "$data:/data:ro" alpine:3.24 stat -c '%n %u:%g' \
     /data/postgres /data/redis /data/elasticsearch /data/storage /data/uploads
   [ -n "$(docker run --rm -v "$data:/data:ro" alpine:3.24 find /data/elasticsearch -name node.lock)" ]
   echo "elasticsearch wrote its node.lock"
+  [ -n "$(docker run --rm -v "$data:/data:ro" alpine:3.24 find /data/postgres/18/docker -name PG_VERSION)" ]
+  echo "postgres wrote its data to postgres/18/docker"
 fi
 
 echo "Smoke test ($mode) passed."

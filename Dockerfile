@@ -4,6 +4,7 @@
 # official manual production installation:
 # https://kadi.readthedocs.io/en/stable/installation/production/manual.html
 
+# Kadi 1.12 requires Python < 3.14.
 ARG PYTHON_VERSION=3.13
 ARG KADI_VERSION=1.12.0
 

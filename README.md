@@ -11,9 +11,9 @@ HTTPS reverse proxy (Caddy, Traefik, nginx, ...) instead of Apache.
 | `kadi`          | `kadi-uwsgi` + Apache's static file serving. Runs `kadi db init` and `kadi search init` on every start, which also applies migrations after upgrades |
 | `celery`        | `kadi-celery`                                                      |
 | `celerybeat`    | `kadi-celerybeat`                                                  |
-| `redis`         | Redis 7                                                            |
+| `redis`         | Redis 8                                                            |
 | `elasticsearch` | Elasticsearch 8.19, single node, heap locked in memory             |
-| `postgres`      | PostgreSQL 17, **optional** (profile `postgres`)                   |
+| `postgres`      | PostgreSQL 18, **optional** (profile `postgres`)                   |
 | `caddy`         | Apache as TLS proxy, **optional** (profile `caddy`)                |
 | `init-permissions` | One-shot, only with `compose.bind-mounts.yml`: creates data directories and fixes their ownership |
 
@@ -75,8 +75,8 @@ recursively when a file has the wrong owner, so data restored as root is fixed t
 
 | Directory                       | Owner (uid:gid) | Image user                     |
 | ------------------------------- | --------------- | ------------------------------ |
-| `postgres/`                     | `999:999`       | `postgres` in `postgres:17`    |
-| `redis/`                        | `999:999`       | `redis` in `redis:7`           |
+| `postgres/`                     | `999:999`       | `postgres` in `postgres:18`    |
+| `redis/`                        | `999:999`       | `redis` in `redis:8`           |
 | `elasticsearch/`                | `1000:0`        | `elasticsearch` in the ES 8.x image |
 | `storage/`, `uploads/`          | `10001:10001`   | `kadi` in this image           |
 | `oidc/` (mode 700)              | `10001:10001`   | `kadi` in this image           |
@@ -301,6 +301,10 @@ your clients cache the JWKS. Never overwrite a key file in place.
 - Other [configuration options](https://kadi.readthedocs.io/en/stable/installation/configuration.html)
   go into `config/kadi.py`, then run `docker compose up -d --build`.
 - Upgrade: change `KADI_VERSION` in `.env`, then run `docker compose up -d --build`.
+- The bundled PostgreSQL is pinned to major version 18. A newer major version cannot read
+  its data directory: moving on needs `pg_upgrade` or a dump and restore, never just a new
+  image tag. PostgreSQL 18 keeps its data in `18/docker` below the volume (mounted at
+  `/var/lib/postgresql`), so an upgraded cluster can sit next to it.
 - Backups: the database, plus the `storage` and `uploads` volumes (and `oidc` with the OIDC
   provider enabled). Search indices can be
   rebuilt with `kadi search reindex`.
@@ -317,6 +321,7 @@ your clients cache the JWKS. Never overwrite a key file in place.
 - Image build, then a smoke test with the bundled PostgreSQL, once with named volumes and
   once with `compose.bind-mounts.yml`: all services must become healthy and the login page
   must load. It also checks that placeholder configuration is rejected.
+  PostgreSQL must keep its data in `18/docker` on its one mount.
 - A third smoke test (`scripts/smoke-test.sh instances`) starts two instances through
   `scripts/instance.sh` on one network, with `compose.embedded-beat.yml` and
   `KADI_CELERY_CONCURRENCY=1`: each alias must reach its own instance, and each worker must

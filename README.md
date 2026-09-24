@@ -246,25 +246,12 @@ and ID tokens cannot be signed. All URLs must come out as `https://` on your pub
 hostname: that requires `KADI_SERVER_NAME` to be exact and the proxy to send
 `X-Forwarded-Proto` (Caddy does by default).
 
-**Registering a client application**: run `kadi-provision` in the `kadi` container. The
-client belongs to an existing user (ID or username), who can manage it in the web UI
-afterwards:
-
-```sh
-docker compose exec kadi kadi-provision oidc-client --owner 1 --name "Batalyse Collect" \
-  --redirect-uri https://collect.example.org/API/auth/oidc/callback
-```
-
-It registers the scopes `openid`, `profile` and `email` (stored as `oidc.openid` etc.) and
-prints `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`. The secret is shown only this once. Pass
-`--redirect-uri` once per URI; they must match exactly. Running the command again with the
-same owner and name registers nothing: it prints the client ID and updates the redirect
-URIs if they changed. To get a new secret, delete the client and run it again. The command
-refuses to run while the provider is disabled.
-
-In the web UI, the same works under *Settings → Applications* (`/settings/applications`)
-of the owning user: enter the redirect URIs (one per line) and tick the *OpenID Connect*
-scopes, which only appear while the provider is enabled.
+**Registering a client application** works only in the web UI: log in as the user who
+should own the client, open *Settings → Applications* (`/settings/applications`), enter
+the redirect URIs (exact match, one per line) and tick the *OpenID Connect* scopes
+(`openid`, `profile`, `email`; stored as `oidc.openid` etc.). They only appear while the
+provider is enabled. Kadi shows the client secret once, after registering. For Batalyse
+Collect, the redirect URI is `<Collect URL>/API/auth/oidc/callback`.
 
 Things client developers need to know:
 
@@ -299,21 +286,17 @@ your clients cache the JWKS. Never overwrite a key file in place.
 
 Services that call Kadi's API, such as Collect's service account, authenticate with a
 personal access token. Give each service its own regular user, not a sysadmin (a token acts
-with all rights of its user), and a token with only the scopes the service needs:
+with all rights of its user), and a token with only the scopes the service needs. Create
+the user on the command line, which prints its initial password:
 
 ```sh
 docker compose exec kadi kadi users create -d "Collect service" -u collect-service \
   -e collect-service@example.org
-docker compose exec kadi kadi-provision token --user collect-service --name collect \
-  --scope "record.read record.update"
 ```
 
-This prints `KADI_SERVICE_TOKEN` once. Kadi reads an empty scope as *no* scopes, so
-`--scope` is required, and each scope is checked against Kadi's list. By default the token
-never expires; `--expires-days` sets an expiry. Running the command again with the same
-user and name creates nothing. If that token has other scopes or has expired, the command
-fails instead: delete the token as that user under *Settings → Access tokens* and run it
-again. Like any user, the service user only reaches records it has a role on.
+Then log in as that user, open *Settings → Access tokens* and create a token with those
+scopes only (for Collect: `record.read` and `record.update`). Kadi shows the token once,
+after creating it. Like any user, the service user only reaches records it has a role on.
 
 ## Plugins
 
@@ -368,9 +351,8 @@ Collect needs, in its own configuration:
 
 - `OIDC_ISSUER_URL=https://<KADI_SERVER_NAME>`: Collect must use this Kadi as its OIDC
   login provider, with the same origin as the Kadi URL browsers use (`KADI_BROWSER_HOST`),
-  or it refuses the embed session. Register Collect as a client with
-  `kadi-provision oidc-client` and the redirect URI `<Collect URL>/API/auth/oidc/callback`
-  (see [OIDC provider](#oidc-provider)).
+  or it refuses the embed session. Register Collect as a client application with the
+  redirect URI `<Collect URL>/API/auth/oidc/callback` (see [OIDC provider](#oidc-provider)).
 - `KADI_EMBED_SERVICE_SECRET`: the same value as `COLLECT_EMBED_SERVICE_SECRET`.
 - `KADI_SERVICE_TOKEN`: a token with `record.read record.update` of a dedicated user (see
   [Access tokens for services](#access-tokens-for-services)). Collect reads and writes the
@@ -455,8 +437,6 @@ Internal addresses avoid that detour when Collect's container shares a Docker ne
   So are an uninstalled plugin in `KADI_PLUGINS` and invalid `COLLECT_EMBED_*` settings
   (the plugin itself is not in CI).
   PostgreSQL must keep its data in `18/docker` on its one mount.
-  `kadi-provision` must register an OIDC client whose secret the token endpoint accepts,
-  and a token with exactly the requested scopes, each only once.
 - A third smoke test (`scripts/smoke-test.sh instances`) starts two instances through
   `scripts/instance.sh` on one network, with `compose.embedded-beat.yml` and
   `KADI_CELERY_CONCURRENCY=1`: each alias must reach its own instance, and each worker must

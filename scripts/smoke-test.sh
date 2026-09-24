@@ -149,60 +149,6 @@ echo "issuer and JWKS ok: $(echo "$jwks" | jq -c '.keys[0] | {kid, kty, alg}')"
 compose exec -T kadi sh -c 'stat -c "%a %u" /opt/kadi/oidc/signing-key.pem' | grep -qx "600 10001"
 echo "signing key generated with mode 600"
 
-echo "--- kadi-provision"
-kadi_exec() {
-  compose exec -T kadi "$@"
-}
-api() {
-  curl -s -o /dev/null -w '%{http_code}' -H 'Host: localhost' -H 'X-Forwarded-Proto: https' "$@"
-}
-owner=$(kadi_exec kadi users create -d Owner -u ci-owner -e owner@example.org -y \
-  | sed -n 's/^User with ID \([0-9]*\) created.*/\1/p')
-echo y | kadi_exec kadi users sysadmin "$owner" >/dev/null
-kadi_exec kadi users create -d Service -u ci-service -e service@example.org -y >/dev/null
-redirect=https://collect.ci.invalid/API/auth/oidc/callback
-
-# refused <message> <command...>: the command must fail with that message.
-refused() {
-  message=$1
-  shift
-  if output=$("$@" 2>&1); then
-    echo "accepted: $*" >&2
-    exit 1
-  fi
-  printf '%s' "$output" | grep -q "$message" || { echo "no '$message': $output" >&2; exit 1; }
-}
-refused "OIDC provider is disabled" kadi_exec env KADI_OIDC_PROVIDER=false \
-  kadi-provision oidc-client --owner ci-owner --name CI --redirect-uri "$redirect"
-output=$(kadi_exec kadi-provision oidc-client --owner ci-owner --name CI --redirect-uri "$redirect")
-client_id=$(printf '%s' "$output" | sed -n 's/^OIDC_CLIENT_ID=//p')
-client_secret=$(printf '%s' "$output" | sed -n 's/^OIDC_CLIENT_SECRET=//p')
-[ -n "$client_id" ] && [ -n "$client_secret" ]
-# The printed secret authenticates the client: a made-up code then fails as invalid_grant.
-token_error() {
-  curl -s -H 'Host: localhost' -H 'X-Forwarded-Proto: https' "http://127.0.0.1:$port/oauth/token" \
-    -d grant_type=authorization_code -d code=made-up -d "redirect_uri=$redirect" \
-    -d "client_id=$client_id" -d "client_secret=$1" | jq -r .error
-}
-[ "$(token_error "$client_secret")" = invalid_grant ]
-[ "$(token_error wrong-secret)" = invalid_client ]
-output=$(kadi_exec kadi-provision oidc-client --owner ci-owner --name CI --redirect-uri "$redirect")
-[ "$output" = "OIDC_CLIENT_ID=$client_id" ]
-echo "OIDC client registered once, secret accepted by /oauth/token"
-
-refused "is a sysadmin" \
-  kadi_exec kadi-provision token --user ci-owner --name collect --scope record.read
-output=$(kadi_exec kadi-provision token --user ci-service --name collect \
-  --scope "record.read record.update")
-pat=$(printf '%s' "$output" | sed -n 's/^KADI_SERVICE_TOKEN=//p')
-[ "$(api -H "Authorization: Bearer $pat" "http://127.0.0.1:$port/api/v1/records")" = 200 ]
-[ "$(api -H "Authorization: Bearer $pat" "http://127.0.0.1:$port/api/v1/collections")" = 401 ]
-[ -z "$(kadi_exec kadi-provision token --user ci-service --name collect \
-  --scope "record.update record.read")" ]
-refused "has the scopes" \
-  kadi_exec kadi-provision token --user ci-service --name collect --scope record.read
-echo "token created once with exactly record.read and record.update"
-
 echo "--- postgres 18 layout"
 compose exec -T postgres cat /var/lib/postgresql/18/docker/PG_VERSION | grep -qx 18
 mounts=$(docker inspect --format '{{range .Mounts}}{{.Destination}} {{end}}' "$(compose ps -q postgres)")

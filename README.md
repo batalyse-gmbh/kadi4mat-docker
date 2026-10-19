@@ -367,6 +367,10 @@ Collect needs, in its own configuration:
   records with it (directly or through a group), or give it the system role `admin`,
   which grants access to every record (sysadmins can change a user's system role in the
   web UI). The token's scopes still limit it to reading and updating records.
+- **Trust the provider's email address** in Collect's OIDC settings, unless
+  `KADI_EMAIL_CONFIRMATION_REQUIRED=true` (which needs working `KADI_SMTP_*`). Kadi reports
+  `email_verified` only for addresses its users confirmed, and with confirmation off (the
+  default) none are, so Collect refuses those users otherwise.
 
 How Kadi users map to Collect accounts is described in the plugin's README.
 

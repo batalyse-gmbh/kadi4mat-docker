@@ -53,7 +53,6 @@ for letter in a b; do
     -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=smoke-$(random 8)|" \
     -e "s|^KADI_HTTP_BIND=.*|KADI_HTTP_BIND=127.0.0.1:$bind|" \
     -e "s|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=postgres|" \
-    -e "s|^ES_JAVA_OPTS=.*|ES_JAVA_OPTS=-Xms512m -Xmx512m|" \
     -e "s|^UWSGI_PROCESSES=.*|UWSGI_PROCESSES=1|" \
     .env.example > "instances/smoke-$letter.env"
   {

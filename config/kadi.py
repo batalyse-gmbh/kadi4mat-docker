@@ -99,15 +99,14 @@ MISC_UPLOADS_PATH = "/opt/kadi/uploads"
 
 CELERY_BROKER_URL = _env("KADI_REDIS_URL", "redis://redis:6379/0")
 
-# Worker processes. Kadi's default, min(CPU count, 10), suits a host running one instance;
-# each process holds its own copy of the app.
-if _env("KADI_CELERY_CONCURRENCY"):
-    try:
-        CELERY_WORKER_CONCURRENCY = int(_env("KADI_CELERY_CONCURRENCY"))
-    except ValueError:
-        CELERY_WORKER_CONCURRENCY = 0
-    if CELERY_WORKER_CONCURRENCY < 1:
-        _errors.append("KADI_CELERY_CONCURRENCY must be a positive number.")
+# Worker processes. Each holds its own copy of the app, and Kadi's background tasks are
+# infrequent, so 2 replaces Kadi's default of min(CPU count, 10).
+try:
+    CELERY_WORKER_CONCURRENCY = int(_env("KADI_CELERY_CONCURRENCY") or 2)
+except ValueError:
+    CELERY_WORKER_CONCURRENCY = 0
+if CELERY_WORKER_CONCURRENCY < 1:
+    _errors.append("KADI_CELERY_CONCURRENCY must be a positive number.")
 RATELIMIT_STORAGE_URI = _env("KADI_REDIS_URL", "redis://redis:6379/0")
 ELASTICSEARCH_HOSTS = [_env("KADI_ELASTICSEARCH_HOST", "http://elasticsearch:9200")]
 

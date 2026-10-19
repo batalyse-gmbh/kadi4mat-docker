@@ -138,18 +138,19 @@ Elasticsearch, `celery` and `redis` stay per instance:
   runs every task against it; it cannot serve a second instance. Redis only carries that
   worker's queue and takes a few MB.
 
-What can be reduced is the per-instance footprint. Measured with Kadi 1.12 on a 16 CPU host
+The defaults keep the per-instance footprint small. Measured with Kadi 1.12 on a 16 CPU host
 after startup:
 
-| Per instance                              | Default                          | Reduced |
-| ----------------------------------------- | -------------------------------- | ------- |
-| `celery` + `celerybeat`                   | ~1.1 GB (10 worker processes + separate scheduler) | ~270 MB with `KADI_CELERY_CONCURRENCY=2` and `compose.embedded-beat.yml` |
-| `elasticsearch`                           | ~1.8 GB with the default 1 GB heap | lower `ES_JAVA_OPTS`, e.g. `-Xms512m -Xmx512m` for small instances |
-| `kadi`                                    | ~150 MB with `UWSGI_PROCESSES=4` | fewer processes for low traffic |
+| Per instance            | Kadi's own defaults                                | This stack                                                     |
+| ----------------------- | -------------------------------------------------- | -------------------------------------------------------------- |
+| `celery` + `celerybeat` | ~1.1 GB (10 worker processes + separate scheduler) | ~270 MB with 2 worker processes and `compose.embedded-beat.yml` |
+| `elasticsearch`         | ~1.8 GB with a 1 GB heap                           | 512 MB heap; raise `ES_JAVA_OPTS` only for large indices        |
+| `kadi`                  | ~150 MB with `UWSGI_PROCESSES=4`                   | fewer processes for low traffic                                 |
 
-`KADI_CELERY_CONCURRENCY` defaults to one worker process per CPU (at most 10); Kadi's
-background tasks (uploads, exports, cleanup) are infrequent, so 1-2 suffice for most
-instances. `compose.embedded-beat.yml` runs the scheduler inside the worker, which is safe
+`KADI_CELERY_CONCURRENCY` defaults to 2 worker processes instead of Kadi's one per CPU (at
+most 10); Kadi's background tasks (uploads, exports, cleanup) are infrequent, so 1-2 suffice
+for most instances. `ES_JAVA_OPTS` defaults to a 512 MB heap, plenty for a near-idle
+instance. `compose.embedded-beat.yml` runs the scheduler inside the worker, which is safe
 as long as each instance has exactly one `celery` container.
 
 **Setup**: configure each instance in `instances/<name>.env`, copied from `.env.example`,
@@ -184,8 +185,6 @@ EXTERNAL_NETWORK=proxy
 POSTGRES_HOST=my-postgres
 POSTGRES_DB=kadi_a
 POSTGRES_USER=kadi_a
-KADI_CELERY_CONCURRENCY=2
-ES_JAVA_OPTS=-Xms512m -Xmx512m
 ```
 
 All instances use the one image built from this checkout, including `config/kadi.py`.

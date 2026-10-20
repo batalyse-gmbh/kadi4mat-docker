@@ -8,7 +8,7 @@ HTTPS reverse proxy (Caddy, Traefik, nginx, ...) instead of Apache.
 
 | Service         | Replaces (official setup)                                          |
 | --------------- | ------------------------------------------------------------------ |
-| `kadi`          | `kadi-uwsgi` + Apache's static file serving. Runs `kadi db init` and `kadi search init` on every start, which also applies migrations after upgrades. First waits for PostgreSQL (30 attempts, 5 s apart) and Elasticsearch (up to 5 min) |
+| `kadi`          | `kadi-uwsgi` + Apache's static file serving. Runs `kadi db init` and `kadi search init` on every start, which also applies migrations after upgrades |
 | `celery`        | `kadi-celery`                                                      |
 | `celerybeat`    | `kadi-celerybeat`                                                  |
 | `redis`         | Redis 8                                                            |
@@ -423,8 +423,8 @@ Internal addresses avoid that detour when Collect's container shares a Docker ne
   does not enforce bootstrap checks (not tested). `ELASTICSEARCH_VERSION` selects
   the image tag; stay on 8.x, Kadi 1.12 does not support Elasticsearch 9.
 - After a reboot, the Docker daemon restarts all containers at once and ignores
-  `depends_on`. `kadi` therefore waits for PostgreSQL and Elasticsearch itself, and only
-  exits (to be restarted by Docker) if one of them is still not ready after that time.
+  `depends_on`. `kadi` therefore waits for PostgreSQL (30 attempts, 5 s apart) and
+  Elasticsearch (up to 5 min) itself, and exits to be restarted by Docker only after that.
 - Other [configuration options](https://kadi.readthedocs.io/en/stable/installation/configuration.html)
   go at the end of `config/kadi.py`, then run `docker compose up -d --build`.
 - Upgrade: change `KADI_VERSION` in `.env`, then run `docker compose up -d --build`.

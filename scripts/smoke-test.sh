@@ -187,8 +187,7 @@ compose exec -T kadi sh -c 'stat -c "%a %u" /opt/kadi/oidc/signing-key.pem' | gr
 echo "signing key generated with mode 600"
 
 echo "--- kadi waits for Elasticsearch"
-# After a reboot, the Docker daemon starts kadi without waiting for depends_on. Plain
-# docker start does the same, so kadi must wait for Elasticsearch instead of exiting.
+# Plain docker start ignores depends_on, like the Docker daemon after a reboot.
 kadi=$(compose ps -q kadi)
 elasticsearch=$(compose ps -q elasticsearch)
 restarts=$(docker inspect --format '{{.RestartCount}}' "$kadi")
@@ -200,13 +199,8 @@ until docker logs "$kadi" 2>&1 | grep -q "Elasticsearch not ready"; do
   [ "$waited" -lt 120 ] || { echo "kadi did not wait for Elasticsearch" >&2; exit 1; }
   sleep 1
 done
-docker start "$elasticsearch" >/dev/null
-waited=0
-until [ "$(docker inspect --format '{{.State.Health.Status}}' "$kadi")" = healthy ]; do
-  waited=$((waited + 5))
-  [ "$waited" -lt "${WAIT_TIMEOUT:-600}" ] || { echo "kadi did not become healthy" >&2; exit 1; }
-  sleep 5
-done
+# Starts only the stopped elasticsearch, then waits for every service to be healthy.
+compose up --detach --wait --wait-timeout "${WAIT_TIMEOUT:-600}"
 [ "$(docker inspect --format '{{.RestartCount}}' "$kadi")" = "$restarts" ] \
   || { echo "kadi restarted while waiting for Elasticsearch" >&2; exit 1; }
 echo "kadi waited for Elasticsearch and became healthy without restarting"

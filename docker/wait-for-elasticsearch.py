@@ -35,6 +35,9 @@ def main():
             print(f"Elasticsearch is up (status {health['status']}).")
             return
         except ApiError as e:
+            if e.meta.status in (401, 403):
+                # Wrong credentials do not fix themselves; let Docker restart us now.
+                sys.exit(f"Elasticsearch rejected the credentials (HTTP {e.meta.status}).")
             reason = f"HTTP {e.meta.status}"
             delay = 0 if e.meta.status == 408 else RETRY_DELAY
         except TransportError as e:

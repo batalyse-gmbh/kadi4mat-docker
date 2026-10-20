@@ -190,9 +190,10 @@ echo "--- kadi waits for Elasticsearch"
 # Plain docker start ignores depends_on, like the Docker daemon after a reboot.
 kadi=$(compose ps -q kadi)
 elasticsearch=$(compose ps -q elasticsearch)
-restarts=$(docker inspect --format '{{.RestartCount}}' "$kadi")
 docker stop "$kadi" "$elasticsearch" >/dev/null
 docker start "$kadi" >/dev/null
+# A manual docker start resets RestartCount, so detect a restart by a new start time.
+started=$(docker inspect --format '{{.State.StartedAt}}' "$kadi")
 waited=0
 until docker logs "$kadi" 2>&1 | grep -q "Elasticsearch not ready"; do
   waited=$((waited + 1))
@@ -201,7 +202,7 @@ until docker logs "$kadi" 2>&1 | grep -q "Elasticsearch not ready"; do
 done
 # Starts only the stopped elasticsearch, then waits for every service to be healthy.
 compose up --detach --wait --wait-timeout "${WAIT_TIMEOUT:-600}"
-[ "$(docker inspect --format '{{.RestartCount}}' "$kadi")" = "$restarts" ] \
+[ "$(docker inspect --format '{{.State.StartedAt}}' "$kadi")" = "$started" ] \
   || { echo "kadi restarted while waiting for Elasticsearch" >&2; exit 1; }
 echo "kadi waited for Elasticsearch and became healthy without restarting"
 

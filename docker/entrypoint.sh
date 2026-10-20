@@ -15,8 +15,9 @@ case "$1" in
     kadi-oidc-keys ensure
 
     # Both commands are idempotent: they apply pending migrations / create missing
-    # indices, so running them on every start also handles upgrades. The retries cover an
-    # external database that is not reachable yet (the bundled one has a healthcheck).
+    # indices, so running them on every start also handles upgrades. The waits cover a
+    # database or Elasticsearch that is not reachable yet: an external one, or any of them
+    # after a reboot, when Docker restarts all containers at once and ignores depends_on.
     tries=0
     until kadi db init; do
       tries=$((tries + 1))
@@ -27,6 +28,7 @@ case "$1" in
       echo "Database not ready, retrying in 5s ($tries/30)..." >&2
       sleep 5
     done
+    kadi-wait-for-elasticsearch
     kadi search init
     export UWSGI_PROCESSES="${UWSGI_PROCESSES:-4}"
     export UWSGI_OFFLOAD_THREADS="${UWSGI_OFFLOAD_THREADS:-2}"

@@ -51,6 +51,7 @@ COPY --from=builder /opt/kadi/venv /opt/kadi/venv
 COPY config/ /opt/kadi/config/
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/kadi-entrypoint
 COPY --chmod=755 docker/oidc-keys.py /usr/local/bin/kadi-oidc-keys
+COPY --chmod=755 docker/wait-for-elasticsearch.py /usr/local/bin/kadi-wait-for-elasticsearch
 
 # Pre-create the data directories so fresh named volumes inherit this ownership, and
 # expose the package's static files under a stable path for uwsgi.ini.

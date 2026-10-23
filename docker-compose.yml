@@ -38,11 +38,18 @@ services:
       # start with a mount at the old path /var/lib/postgresql/data.
       - postgres:/var/lib/postgresql
     networks: [backend]
+    # Every probe is a "docker exec", which costs far more than the check itself. So all
+    # healthchecks probe every start_interval until the first success (keeping
+    # "depends_on: service_healthy" and "up --wait" fast), then only every interval.
+    # start_period must cover the slowest start: a service still starting when it ends
+    # waits a full interval for the next probe.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
+      interval: 60s
       timeout: 5s
-      retries: 20
+      retries: 3
+      start_period: 100s
+      start_interval: 2s
 
   redis:
     image: redis:8
@@ -53,9 +60,11 @@ services:
     networks: [backend]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+      interval: 60s
       timeout: 5s
-      retries: 20
+      retries: 3
+      start_period: 100s
+      start_interval: 2s
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTICSEARCH_VERSION:-8.19.22}
@@ -76,9 +85,11 @@ services:
     networks: [backend]
     healthcheck:
       test: ["CMD-SHELL", "curl -fs 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null"]
-      interval: 10s
+      interval: 60s
       timeout: 10s
-      retries: 30
+      retries: 3
+      start_period: 300s
+      start_interval: 5s
 
   # uWSGI application server. Runs "kadi db init" and "kadi search init" on start.
   kadi:
@@ -107,10 +118,11 @@ services:
       elasticsearch: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8000), 2)"]
-      interval: 10s
+      interval: 60s
       timeout: 5s
-      retries: 30
-      start_period: 60s
+      retries: 3
+      start_period: 360s
+      start_interval: 5s
 
   celery:
     <<: *kadi
@@ -121,10 +133,11 @@ services:
       # Plain celery with only the broker URL answers in about a second; "kadi celery ..."
       # would load the whole Flask app and check the database on every probe.
       test: ["CMD-SHELL", "celery --broker \"$${KADI_REDIS_URL:-redis://redis:6379/0}\" inspect ping --destination \"celery@$${HOSTNAME}\" --timeout 10 >/dev/null"]
-      interval: 30s
+      interval: 120s
       timeout: 20s
       retries: 3
       start_period: 60s
+      start_interval: 5s
 
   celerybeat:
     <<: *kadi
@@ -137,10 +150,11 @@ services:
       # liveness signal: Kadi's only periodic task runs hourly. A crashed beat process
       # stops the container, which resets the health status.
       test: ["CMD", "test", "-f", "/tmp/celerybeat-schedule"]
-      interval: 15s
+      interval: 60s
       timeout: 5s
       retries: 3
       start_period: 60s
+      start_interval: 5s
 
   # Bundled reverse proxy, only for hosts without one: enable with COMPOSE_PROFILES=caddy.
   # Needs ports 80 and 443 and a KADI_SERVER_NAME without a port.
